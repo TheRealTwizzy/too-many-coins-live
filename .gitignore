@@ -15,3 +15,6 @@ Thumbs.db
 
 # PHP logs
 *.log
+
+# Environment
+.env

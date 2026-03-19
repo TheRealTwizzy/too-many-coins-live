@@ -48,6 +48,13 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/actions.php';
 require_once __DIR__ . '/../includes/tick_engine.php';
 
+// Database initialization endpoint (must be before server_state check)
+$earlyAction = $_GET['action'] ?? '';
+if ($earlyAction === 'init_db') {
+    require_once __DIR__ . '/../init_db.php';
+    exit;
+}
+
 // Initialize server state if needed
 $db = Database::getInstance();
 $serverState = $db->fetch("SELECT * FROM server_state WHERE id = 1");
