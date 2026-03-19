@@ -1,0 +1,17 @@
+# Test files
+test_*.txt
+ui_test_*.txt
+notes.txt
+doc_findings_*.txt
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+
+# PHP logs
+*.log

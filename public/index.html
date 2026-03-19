@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Too Many Coins</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <!-- IDLE MODAL OVERLAY -->
+        <div id="idle-modal" class="modal-overlay" style="display:none;">
+            <div class="modal-box idle-modal-box">
+                <div class="modal-icon">&#9203;</div>
+                <h2>You've Gone Idle</h2>
+                <p>Your UBI rate has been reduced due to inactivity. Click below to resume full participation.</p>
+                <button class="btn btn-primary btn-lg" onclick="TMC.idleAck()">I'm Back!</button>
+            </div>
+        </div>
+
+        <!-- TOP NAV BAR -->
+        <header id="top-bar">
+            <div class="top-bar-inner">
+                <div class="logo" onclick="TMC.navigate('home')">
+                    <span class="logo-icon">&#9733;</span>
+                    <span class="logo-text">Too Many Coins</span>
+                </div>
+                <nav id="main-nav">
+                    <button class="nav-btn active" data-screen="home" onclick="TMC.navigate('home')">Home</button>
+                    <button class="nav-btn" data-screen="seasons" onclick="TMC.navigate('seasons')">Seasons</button>
+                    <button class="nav-btn" data-screen="global-lb" onclick="TMC.navigate('global-lb')">Global Leaderboard</button>
+                    <button class="nav-btn" data-screen="shop" onclick="TMC.navigate('shop')">Cosmetics</button>
+                    <button class="nav-btn" data-screen="chat" onclick="TMC.navigate('chat')">Chat</button>
+                </nav>
+                <div id="user-area">
+                    <!-- Filled by JS -->
+                </div>
+            </div>
+        </header>
+
+        <!-- PLAYER HUD (shown when in a season) -->
+        <div id="player-hud" style="display:none;">
+            <div class="hud-inner">
+                <div class="hud-item hud-coins">
+                    <span class="hud-label">Coins</span>
+                    <span class="hud-value" id="hud-coins">0</span>
+                </div>
+                <div class="hud-item hud-stars">
+                    <span class="hud-label">Seasonal Stars</span>
+                    <span class="hud-value" id="hud-seasonal-stars">0</span>
+                </div>
+                <div class="hud-item hud-sigils">
+                    <span class="hud-label">Sigils</span>
+                    <span class="hud-value" id="hud-sigils">0</span>
+                </div>
+                <div class="hud-item hud-global">
+                    <span class="hud-label">Global Stars</span>
+                    <span class="hud-value" id="hud-global-stars">0</span>
+                </div>
+                <div class="hud-item hud-boosts">
+                    <span class="hud-label">Boosts</span>
+                    <span class="hud-value" id="hud-boosts">0</span>
+                </div>
+                <div class="hud-item hud-activity">
+                    <span class="hud-label">Status</span>
+                    <span class="hud-value" id="hud-activity">Active</span>
+                </div>
+                <div class="hud-item hud-season-info">
+                    <span class="hud-label">Season</span>
+                    <span class="hud-value" id="hud-season-timer">--</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- MAIN CONTENT AREA -->
+        <main id="main-content">
+            <!-- HOME SCREEN -->
+            <section id="screen-home" class="screen active">
+                <div class="hero-section">
+                    <h1>Too Many Coins</h1>
+                    <p class="hero-subtitle">A deterministic economic competition where every coin tells a story of sacrifice, strategy, and timing.</p>
+                    <div id="hero-cta">
+                        <!-- Filled by JS based on auth state -->
+                    </div>
+                </div>
+                <div class="home-grid">
+                    <div class="info-card">
+                        <h3>&#9733; Earn Coins</h3>
+                        <p>Receive Universal Basic Income (UBI) every tick. Active players earn more. Hoarders earn less.</p>
+                    </div>
+                    <div class="info-card">
+                        <h3>&#11088; Buy Stars</h3>
+                        <p>Convert Coins into Seasonal Stars. Stars determine your rank and can be converted to Global Stars.</p>
+                    </div>
+                    <div class="info-card">
+                        <h3>&#128142; Collect Sigils</h3>
+                        <p>Rare random drops while participating, or purchase from the Vault. Consume Sigils to activate powerful Boosts.</p>
+                    </div>
+                    <div class="info-card">
+                        <h3>&#9889; Activate Boosts</h3>
+                        <p>Burn Sigils to activate temporary UBI modifiers. Self-boosts or season-wide effects that benefit everyone.</p>
+                    </div>
+                    <div class="info-card">
+                        <h3>&#128274; Lock-In</h3>
+                        <p>Exit early and convert your Seasonal Stars to Global Stars. A calculated sacrifice.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- AUTH SCREEN -->
+            <section id="screen-auth" class="screen">
+                <div class="auth-container">
+                    <div class="auth-tabs">
+                        <button class="auth-tab active" onclick="TMC.showAuthTab('login')">Login</button>
+                        <button class="auth-tab" onclick="TMC.showAuthTab('register')">Register</button>
+                    </div>
+                    <form id="login-form" class="auth-form" onsubmit="TMC.login(event)">
+                        <h2>Welcome Back</h2>
+                        <div class="form-group">
+                            <label>Email</label>
+                            <input type="email" id="login-email" required placeholder="player@example.com">
+                        </div>
+                        <div class="form-group">
+                            <label>Password</label>
+                            <input type="password" id="login-password" required placeholder="Your password">
+                        </div>
+                        <div id="login-error" class="form-error"></div>
+                        <button type="submit" class="btn btn-primary btn-lg btn-full">Login</button>
+                    </form>
+                    <form id="register-form" class="auth-form" style="display:none;" onsubmit="TMC.register(event)">
+                        <h2>Join the Game</h2>
+                        <div class="form-group">
+                            <label>Handle (3-16 chars, letters/numbers/underscore)</label>
+                            <input type="text" id="reg-handle" required pattern="[A-Za-z0-9_]{3,16}" placeholder="YourHandle">
+                        </div>
+                        <div class="form-group">
+                            <label>Email</label>
+                            <input type="email" id="reg-email" required placeholder="player@example.com">
+                        </div>
+                        <div class="form-group">
+                            <label>Password</label>
+                            <input type="password" id="reg-password" required minlength="6" placeholder="Min 6 characters">
+                        </div>
+                        <div id="register-error" class="form-error"></div>
+                        <button type="submit" class="btn btn-primary btn-lg btn-full">Create Account</button>
+                    </form>
+                </div>
+            </section>
+
+            <!-- SEASONS SCREEN -->
+            <section id="screen-seasons" class="screen">
+                <h2 class="screen-title">Seasons</h2>
+                <p class="screen-subtitle">28-day competitive seasons. New seasons start every 7 days. One active participation at a time.</p>
+                <div id="seasons-list" class="seasons-grid">
+                    <!-- Filled by JS -->
+                </div>
+            </section>
+
+            <!-- SEASON DETAIL / GAMEPLAY SCREEN -->
+            <section id="screen-season-detail" class="screen">
+                <div id="season-detail-content">
+                    <!-- Filled by JS -->
+                </div>
+            </section>
+
+            <!-- GLOBAL LEADERBOARD -->
+            <section id="screen-global-lb" class="screen">
+                <h2 class="screen-title">Global Leaderboard</h2>
+                <p class="screen-subtitle">Ranked by Global Stars earned this yearly cycle. Stars reset annually.</p>
+                <div id="global-lb-content">
+                    <table class="leaderboard-table">
+                        <thead>
+                            <tr><th>Rank</th><th>Player</th><th>Global Stars</th></tr>
+                        </thead>
+                        <tbody id="global-lb-body">
+                        </tbody>
+                    </table>
+                    <div id="global-lb-empty" class="empty-state" style="display:none;">
+                        <p>No players on the leaderboard yet. Earn Global Stars through season outcomes and Lock-In!</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- COSMETICS SHOP -->
+            <section id="screen-shop" class="screen">
+                <h2 class="screen-title">Cosmetics Shop</h2>
+                <p class="screen-subtitle">Spend Global Stars on cosmetic items. Zero gameplay impact. Pure prestige.</p>
+                <div class="shop-tabs">
+                    <button class="shop-tab active" onclick="TMC.filterShop('all')">All</button>
+                    <button class="shop-tab" onclick="TMC.filterShop('avatar_frame')">Frames</button>
+                    <button class="shop-tab" onclick="TMC.filterShop('name_color')">Colors</button>
+                    <button class="shop-tab" onclick="TMC.filterShop('profile_bg')">Backgrounds</button>
+                    <button class="shop-tab" onclick="TMC.filterShop('title')">Titles</button>
+                    <button class="shop-tab" onclick="TMC.filterShop('effect')">Effects</button>
+                </div>
+                <div id="shop-grid" class="shop-grid">
+                    <!-- Filled by JS -->
+                </div>
+            </section>
+
+            <!-- CHAT SCREEN -->
+            <section id="screen-chat" class="screen">
+                <h2 class="screen-title">Chat</h2>
+                <div class="chat-tabs">
+                    <button class="chat-tab active" onclick="TMC.switchChat('GLOBAL')">Global</button>
+                    <button class="chat-tab" id="chat-season-tab" onclick="TMC.switchChat('SEASON')" style="display:none;">Season</button>
+                </div>
+                <div id="chat-container" class="chat-container">
+                    <div id="chat-messages" class="chat-messages">
+                        <!-- Filled by JS -->
+                    </div>
+                    <div id="chat-input-area" class="chat-input-area" style="display:none;">
+                        <input type="text" id="chat-input" placeholder="Type a message..." maxlength="500" onkeypress="if(event.key==='Enter')TMC.sendChat()">
+                        <button class="btn btn-primary" onclick="TMC.sendChat()">Send</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- PROFILE SCREEN -->
+            <section id="screen-profile" class="screen">
+                <div id="profile-content">
+                    <!-- Filled by JS -->
+                </div>
+            </section>
+
+            <!-- TRADE SCREEN -->
+            <section id="screen-trade" class="screen">
+                <div id="trade-content">
+                    <!-- Filled by JS -->
+                </div>
+            </section>
+        </main>
+
+        <!-- TOAST NOTIFICATIONS -->
+        <div id="toast-container"></div>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>

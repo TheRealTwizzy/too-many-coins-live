@@ -1,0 +1,553 @@
+<?php
+/**
+ * Too Many Coins - Tick Engine
+ * Processes the authoritative game tick: system events, sigil drops, actions, UBI, boosts
+ * Follows Chapter 03 tick order:
+ *   1. Tick classification + snapshot
+ *   2. System-event phase (boost expiration)
+ *   3. Sigil drop evaluation phase
+ *   4. Player action resolution phase
+ *   5. System math + accrual phase (UBI with boost modifiers)
+ *   6. Market/price-surface publish phase
+ *   7. Activity evaluation phase
+ *   8. Leaderboard recalculation phase
+ *   9. Persistence + audit
+ */
+require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/database.php';
+require_once __DIR__ . '/game_time.php';
+require_once __DIR__ . '/economy.php';
+
+class TickEngine {
+    
+    /**
+     * Process all pending ticks for all active seasons
+     */
+    public static function processTicks() {
+        $db = Database::getInstance();
+        GameTime::ensureSeasons();
+        $gameTime = GameTime::now();
+        
+        // Get all active/blackout seasons
+        $seasons = $db->fetchAll(
+            "SELECT * FROM seasons WHERE status IN ('Active', 'Blackout') OR (status = 'Expired' AND expiration_finalized = 0)"
+        );
+        
+        foreach ($seasons as $season) {
+            self::processSeasonTick($season, $gameTime);
+        }
+        
+        // Update server state
+        $db->query(
+            "UPDATE server_state SET global_tick_index = ?, last_tick_processed_at = NOW() WHERE id = 1",
+            [$gameTime]
+        );
+    }
+    
+    /**
+     * Process a single tick batch for a season
+     */
+    private static function processSeasonTick($season, $gameTime) {
+        $db = Database::getInstance();
+        $seasonId = $season['season_id'];
+        $startTime = (int)$season['start_time'];
+        $endTime = (int)$season['end_time'];
+        $blackoutTime = (int)$season['blackout_time'];
+        $lastProcessed = (int)$season['last_processed_tick'];
+        
+        $currentSeasonTick = GameTime::seasonTick($startTime, $gameTime);
+        $seasonDurationTicks = $endTime - $startTime;
+        
+        // Don't process before season starts
+        if ($currentSeasonTick < 0) return;
+        
+        // Cap to season duration
+        $currentSeasonTick = min($currentSeasonTick, $seasonDurationTicks);
+        
+        $lastSeasonTick = max(0, $lastProcessed - $startTime);
+        
+        // Skip if already processed
+        if ($currentSeasonTick <= $lastSeasonTick) return;
+        
+        // Process in batches
+        $ticksToProcess = $currentSeasonTick - $lastSeasonTick;
+        
+        // Check if this is the expiration tick
+        $isExpiration = ($gameTime >= $endTime && !$season['expiration_finalized']);
+        
+        if ($isExpiration) {
+            self::processExpiration($season);
+            return;
+        }
+        
+        // Get all participating players for this season
+        $participants = $db->fetchAll(
+            "SELECT p.*, sp.* FROM players p 
+             JOIN season_participation sp ON p.player_id = sp.player_id 
+             WHERE p.joined_season_id = ? AND p.participation_enabled = 1 AND sp.season_id = ?",
+            [$seasonId, $seasonId]
+        );
+        
+        if (empty($participants)) {
+            $db->query(
+                "UPDATE seasons SET last_processed_tick = ? WHERE season_id = ?",
+                [$gameTime, $seasonId]
+            );
+            return;
+        }
+        
+        $isBlackout = ($gameTime >= $blackoutTime);
+        $isLastValid = ($currentSeasonTick >= $seasonDurationTicks - 1);
+        
+        $db->beginTransaction();
+        try {
+            // Phase 2: System-event phase - expire old boosts
+            self::expireBoosts($seasonId, $gameTime);
+            
+            // Get active global boosts for UBI modifier calculation
+            $globalBoosts = self::getActiveGlobalBoosts($seasonId, $gameTime);
+            
+            $totalNewCoins = 0;
+            
+            foreach ($participants as $p) {
+                $playerId = $p['player_id'];
+                
+                // Phase 3: Sigil drop evaluation (not on last-valid or expiration)
+                if (!$isLastValid && !$isExpiration) {
+                    self::processSigilDrops($season, $p, $seasonId, $gameTime, $currentSeasonTick, $ticksToProcess, $startTime, $lastSeasonTick);
+                }
+                
+                // Phase 5: UBI accrual with boost modifiers
+                $selfBoosts = self::getActivePlayerBoosts($playerId, $seasonId, $gameTime);
+                $boostModFp = self::calculateBoostModifier($selfBoosts, $globalBoosts);
+                
+                $ubiPerTick = Economy::calculateUBI($season, $p, $p);
+                
+                // Apply boost modifier to UBI
+                if ($boostModFp > 0) {
+                    $boostedUbi = Economy::fpMultiply($ubiPerTick, FP_SCALE + $boostModFp);
+                    $ubiPerTick = max($ubiPerTick, $boostedUbi); // Boosts can only increase UBI
+                }
+                
+                $totalUbi = $ubiPerTick * $ticksToProcess;
+                
+                if ($totalUbi > 0) {
+                    $db->query(
+                        "UPDATE season_participation SET coins = coins + ? WHERE player_id = ? AND season_id = ?",
+                        [$totalUbi, $playerId, $seasonId]
+                    );
+                    $totalNewCoins += $totalUbi;
+                }
+                
+                // Update participation tracking
+                $activeTicks = ($p['activity_state'] === 'Active') ? $ticksToProcess : 0;
+                $db->query(
+                    "UPDATE season_participation SET 
+                     participation_time_total = participation_time_total + ?,
+                     participation_ticks_since_join = participation_ticks_since_join + ?,
+                     active_ticks_total = active_ticks_total + ?
+                     WHERE player_id = ? AND season_id = ?",
+                    [$ticksToProcess, $ticksToProcess, $activeTicks, $playerId, $seasonId]
+                );
+                
+                // Phase 7: Activity evaluation (idle check)
+                if ($p['activity_state'] === 'Active') {
+                    $lastActivityTick = $p['last_activity_tick'] ?? ($startTime + $lastSeasonTick);
+                    $ticksSinceActivity = $gameTime - $lastActivityTick;
+                    
+                    if ($ticksSinceActivity >= IDLE_TIMEOUT_TICKS) {
+                        $db->query(
+                            "UPDATE players SET activity_state = 'Idle', idle_modal_active = 1, idle_since_tick = ?
+                             WHERE player_id = ?",
+                            [$gameTime, $playerId]
+                        );
+                    }
+                }
+            }
+            
+            // Phase 6: Update season supply and star price
+            $db->query(
+                "UPDATE seasons SET 
+                 total_coins_supply = total_coins_supply + ?,
+                 total_coins_supply_end_of_tick = total_coins_supply + ?,
+                 last_processed_tick = ?
+                 WHERE season_id = ?",
+                [$totalNewCoins, $totalNewCoins, $gameTime, $seasonId]
+            );
+            
+            // Recalculate star price
+            $updatedSeason = $db->fetch("SELECT * FROM seasons WHERE season_id = ?", [$seasonId]);
+            $newPrice = Economy::calculateStarPrice($updatedSeason);
+            $db->query(
+                "UPDATE seasons SET current_star_price = ? WHERE season_id = ?",
+                [$newPrice, $seasonId]
+            );
+            
+            // Update vault costs
+            self::updateVaultCosts($seasonId);
+            
+            // Expire old trades
+            $db->query(
+                "UPDATE trades SET status = 'EXPIRED' 
+                 WHERE season_id = ? AND status = 'OPEN' AND expires_tick <= ?",
+                [$seasonId, $gameTime]
+            );
+            
+            $db->commit();
+        } catch (Exception $e) {
+            $db->rollback();
+            error_log("Tick processing error for season {$seasonId}: " . $e->getMessage());
+        }
+    }
+    
+    /**
+     * Process Sigil drops for a player over a batch of ticks
+     * Implements: Bernoulli 1/50000, pity at 120K, throttle 3 per 86.4K window
+     */
+    private static function processSigilDrops($season, $player, $seasonId, $gameTime, $currentSeasonTick, $ticksToProcess, $startTime, $lastSeasonTick) {
+        $db = Database::getInstance();
+        $playerId = $player['player_id'];
+        
+        // Only active, online, participating players get drops
+        if (!$player['online_current'] || $player['activity_state'] !== 'Active') {
+            // Reset pity counter when not eligible
+            $db->query(
+                "UPDATE season_participation SET eligible_ticks_since_last_drop = 0 
+                 WHERE player_id = ? AND season_id = ?",
+                [$playerId, $seasonId]
+            );
+            return;
+        }
+        
+        $pityCounter = (int)($player['eligible_ticks_since_last_drop'] ?? 0);
+        
+        // Check throttle: count drops in the rolling window
+        $windowStart = max(0, $currentSeasonTick - SIGIL_DROP_WINDOW_TICKS);
+        $windowStartGameTime = $startTime + $windowStart;
+        $dropsInWindow = $db->fetch(
+            "SELECT COUNT(*) as cnt FROM sigil_drop_log 
+             WHERE player_id = ? AND season_id = ? AND drop_tick >= ?",
+            [$playerId, $seasonId, $windowStartGameTime]
+        )['cnt'] ?? 0;
+        
+        $throttled = ($dropsInWindow >= SIGIL_MAX_DROPS_WINDOW);
+        
+        if ($throttled) {
+            // Throttled: no drops, pity doesn't increment
+            return;
+        }
+        
+        // Process drops over the batch of ticks
+        // For efficiency, we simulate the batch probabilistically
+        $dropsAwarded = 0;
+        $maxNewDrops = SIGIL_MAX_DROPS_WINDOW - $dropsInWindow;
+        
+        // Check pity first
+        $newPityCounter = $pityCounter + $ticksToProcess;
+        
+        if ($newPityCounter >= SIGIL_PITY_TICKS && $dropsAwarded < $maxNewDrops) {
+            // Pity drop: forced Tier I
+            self::awardSigilDrop($playerId, $seasonId, 1, $gameTime, 'PITY');
+            $dropsAwarded++;
+            $newPityCounter = 0;
+        }
+        
+        // RNG drops: for each tick in the batch, run Bernoulli trial
+        // For large batches, use expected value + variance approach
+        if ($ticksToProcess <= 100 && $dropsAwarded < $maxNewDrops) {
+            // Small batch: simulate each tick
+            for ($t = 0; $t < $ticksToProcess && $dropsAwarded < $maxNewDrops; $t++) {
+                $tickIndex = $lastSeasonTick + $t;
+                $absoluteTick = $startTime + $tickIndex;
+                
+                $tier = Economy::processSigilDrop($season, $playerId, $absoluteTick);
+                if ($tier > 0) {
+                    self::awardSigilDrop($playerId, $seasonId, $tier, $absoluteTick, 'RNG');
+                    $dropsAwarded++;
+                    $newPityCounter = 0;
+                }
+            }
+        } else if ($dropsAwarded < $maxNewDrops) {
+            // Large batch: use probabilistic sampling
+            // Expected drops = ticksToProcess / SIGIL_DROP_RATE
+            // For very large batches, sample a few representative ticks
+            $sampleCount = min($ticksToProcess, 500);
+            $sampleInterval = max(1, intdiv($ticksToProcess, $sampleCount));
+            
+            for ($i = 0; $i < $sampleCount && $dropsAwarded < $maxNewDrops; $i++) {
+                $tickIndex = $lastSeasonTick + ($i * $sampleInterval);
+                $absoluteTick = $startTime + $tickIndex;
+                
+                // Scale probability for the interval
+                $tier = Economy::processSigilDrop($season, $playerId, $absoluteTick);
+                if ($tier > 0) {
+                    self::awardSigilDrop($playerId, $seasonId, $tier, $absoluteTick, 'RNG');
+                    $dropsAwarded++;
+                    $newPityCounter = 0;
+                }
+            }
+        }
+        
+        // Update pity counter
+        $db->query(
+            "UPDATE season_participation SET eligible_ticks_since_last_drop = ? 
+             WHERE player_id = ? AND season_id = ?",
+            [$newPityCounter, $playerId, $seasonId]
+        );
+    }
+    
+    /**
+     * Award a Sigil drop to a player
+     */
+    private static function awardSigilDrop($playerId, $seasonId, $tier, $dropTick, $source) {
+        $db = Database::getInstance();
+        $sigilCol = "sigils_t{$tier}";
+        
+        // Add sigil to inventory
+        $db->query(
+            "UPDATE season_participation SET {$sigilCol} = {$sigilCol} + 1, sigil_drops_total = sigil_drops_total + 1
+             WHERE player_id = ? AND season_id = ?",
+            [$playerId, $seasonId]
+        );
+        
+        // Log the drop
+        $db->query(
+            "INSERT INTO sigil_drop_log (player_id, season_id, drop_tick, tier, source) VALUES (?, ?, ?, ?, ?)",
+            [$playerId, $seasonId, $dropTick, $tier, $source]
+        );
+        
+        // Update tracking
+        $db->query(
+            "INSERT INTO sigil_drop_tracking (player_id, season_id, eligible_ticks_since_last_drop, total_drops, last_drop_tick)
+             VALUES (?, ?, 0, 1, ?)
+             ON DUPLICATE KEY UPDATE eligible_ticks_since_last_drop = 0, total_drops = total_drops + 1, last_drop_tick = ?",
+            [$playerId, $seasonId, $dropTick, $dropTick]
+        );
+    }
+    
+    /**
+     * Expire boosts that have passed their expiration tick
+     */
+    private static function expireBoosts($seasonId, $gameTime) {
+        $db = Database::getInstance();
+        $db->query(
+            "UPDATE active_boosts SET is_active = 0 
+             WHERE season_id = ? AND is_active = 1 AND expires_tick <= ?",
+            [$seasonId, $gameTime]
+        );
+    }
+    
+    /**
+     * Get active global boosts for a season
+     */
+    private static function getActiveGlobalBoosts($seasonId, $gameTime) {
+        $db = Database::getInstance();
+        return $db->fetchAll(
+            "SELECT ab.*, bc.name, bc.modifier_fp as catalog_modifier_fp
+             FROM active_boosts ab
+             JOIN boost_catalog bc ON bc.boost_id = ab.boost_id
+             WHERE ab.season_id = ? AND ab.is_active = 1 AND ab.scope = 'GLOBAL' AND ab.expires_tick > ?",
+            [$seasonId, $gameTime]
+        );
+    }
+    
+    /**
+     * Get active self boosts for a specific player
+     */
+    private static function getActivePlayerBoosts($playerId, $seasonId, $gameTime) {
+        $db = Database::getInstance();
+        return $db->fetchAll(
+            "SELECT ab.*, bc.name, bc.modifier_fp as catalog_modifier_fp
+             FROM active_boosts ab
+             JOIN boost_catalog bc ON bc.boost_id = ab.boost_id
+             WHERE ab.player_id = ? AND ab.season_id = ? AND ab.is_active = 1 AND ab.scope = 'SELF' AND ab.expires_tick > ?",
+            [$playerId, $seasonId, $gameTime]
+        );
+    }
+    
+    /**
+     * Calculate total boost modifier (fixed-point) from active boosts
+     * Returns the sum of all modifier_fp values (to be added to FP_SCALE for multiplier)
+     */
+    private static function calculateBoostModifier($selfBoosts, $globalBoosts) {
+        $totalMod = 0;
+        
+        foreach ($selfBoosts as $b) {
+            $totalMod += (int)$b['modifier_fp'];
+        }
+        foreach ($globalBoosts as $b) {
+            $totalMod += (int)$b['modifier_fp'];
+        }
+        
+        // Clamp: max 5x UBI multiplier (mod_cap_multiplier_fp = 5_000_000)
+        $maxMod = 5000000 - FP_SCALE; // 4_000_000
+        return Economy::clamp($totalMod, 0, $maxMod);
+    }
+    
+    /**
+     * Process season expiration and finalization
+     */
+    private static function processExpiration($season) {
+        $db = Database::getInstance();
+        $seasonId = $season['season_id'];
+        
+        $db->beginTransaction();
+        try {
+            // 1. Mark expired
+            $db->query(
+                "UPDATE seasons SET season_expired = 1, status = 'Expired' WHERE season_id = ?",
+                [$seasonId]
+            );
+            
+            // 2. Remove all boosts and system events
+            $db->query(
+                "UPDATE active_boosts SET is_active = 0 WHERE season_id = ?",
+                [$seasonId]
+            );
+            
+            // 3. Cancel all open trades
+            $db->query(
+                "UPDATE trades SET status = 'EXPIRED' WHERE season_id = ? AND status = 'OPEN'",
+                [$seasonId]
+            );
+            
+            // 4. Get end-finishers
+            $endFinishers = $db->fetchAll(
+                "SELECT p.player_id, sp.* FROM players p
+                 JOIN season_participation sp ON p.player_id = sp.player_id
+                 WHERE p.joined_season_id = ? AND p.participation_enabled = 1 AND sp.season_id = ?",
+                [$seasonId, $seasonId]
+            );
+            
+            // Mark end membership
+            foreach ($endFinishers as $ef) {
+                $db->query(
+                    "UPDATE season_participation SET end_membership = 1, final_seasonal_stars = seasonal_stars
+                     WHERE player_id = ? AND season_id = ?",
+                    [$ef['player_id'], $seasonId]
+                );
+            }
+            
+            // 5. Compute final rankings
+            $rankedEntries = $db->fetchAll(
+                "SELECT sp.player_id, sp.seasonal_stars, sp.lock_in_snapshot_seasonal_stars,
+                        sp.end_membership, sp.active_ticks_total
+                 FROM season_participation sp
+                 WHERE sp.season_id = ? 
+                 AND (sp.end_membership = 1 OR sp.lock_in_effect_tick IS NOT NULL)
+                 ORDER BY sp.seasonal_stars DESC, sp.player_id ASC",
+                [$seasonId]
+            );
+            
+            $rank = 0;
+            foreach ($rankedEntries as $entry) {
+                $rank++;
+                $db->query(
+                    "UPDATE season_participation SET final_rank = ? WHERE player_id = ? AND season_id = ?",
+                    [$rank, $entry['player_id'], $seasonId]
+                );
+            }
+            
+            // 6. No-winner guard
+            $topValue = !empty($rankedEntries) ? (int)$rankedEntries[0]['seasonal_stars'] : 0;
+            $awardBadgesAndPlacement = ($topValue > 0);
+            
+            // 7. Award bonuses to end-finishers
+            $endRank = 0;
+            foreach ($endFinishers as $ef) {
+                $endRank++;
+                $globalStarsEarned = 0;
+                
+                // Participation bonus
+                $activeTicks = (int)$ef['active_ticks_total'];
+                $participationBonus = min(intdiv($activeTicks, PARTICIPATION_BONUS_DIVISOR), PARTICIPATION_BONUS_CAP);
+                $globalStarsEarned += $participationBonus;
+                
+                // Placement bonus
+                $placementBonus = 0;
+                if ($awardBadgesAndPlacement && isset(PLACEMENT_BONUS[$endRank])) {
+                    $placementBonus = PLACEMENT_BONUS[$endRank];
+                    $globalStarsEarned += $placementBonus;
+                }
+                
+                // Natural-end conversion: SeasonalStars -> GlobalStars 1:1
+                $seasonalStars = (int)$ef['seasonal_stars'];
+                $globalStarsEarned += $seasonalStars;
+                
+                // Apply to player
+                $db->query(
+                    "UPDATE players SET global_stars = global_stars + ? WHERE player_id = ?",
+                    [$globalStarsEarned, $ef['player_id']]
+                );
+                
+                // Record in participation
+                $db->query(
+                    "UPDATE season_participation SET 
+                     global_stars_earned = ?, participation_bonus = ?, placement_bonus = ?,
+                     seasonal_stars = 0, coins = 0, 
+                     sigils_t1 = 0, sigils_t2 = 0, sigils_t3 = 0, sigils_t4 = 0, sigils_t5 = 0,
+                     active_boosts = NULL
+                     WHERE player_id = ? AND season_id = ?",
+                    [$globalStarsEarned, $participationBonus, $placementBonus, $ef['player_id'], $seasonId]
+                );
+                
+                // Award badges
+                if ($awardBadgesAndPlacement && $endRank <= 3) {
+                    $badgeTypes = [1 => 'seasonal_first', 2 => 'seasonal_second', 3 => 'seasonal_third'];
+                    $db->query(
+                        "INSERT INTO badges (player_id, badge_type, season_id) VALUES (?, ?, ?)",
+                        [$ef['player_id'], $badgeTypes[$endRank], $seasonId]
+                    );
+                }
+                
+                // Detach player from season
+                $db->query(
+                    "UPDATE players SET joined_season_id = NULL, participation_enabled = 0, 
+                     idle_modal_active = 0, activity_state = 'Active'
+                     WHERE player_id = ?",
+                    [$ef['player_id']]
+                );
+            }
+            
+            // 8. Mark finalized
+            $db->query(
+                "UPDATE seasons SET expiration_finalized = 1 WHERE season_id = ?",
+                [$seasonId]
+            );
+            
+            $db->commit();
+        } catch (Exception $e) {
+            $db->rollback();
+            error_log("Expiration processing error for season {$seasonId}: " . $e->getMessage());
+        }
+    }
+    
+    /**
+     * Update vault costs based on remaining supply
+     */
+    private static function updateVaultCosts($seasonId) {
+        $db = Database::getInstance();
+        $season = $db->fetch("SELECT vault_config FROM seasons WHERE season_id = ?", [$seasonId]);
+        
+        $vaultItems = $db->fetchAll(
+            "SELECT * FROM season_vault WHERE season_id = ?",
+            [$seasonId]
+        );
+        
+        foreach ($vaultItems as $item) {
+            $newCost = Economy::calculateVaultCost(
+                $season['vault_config'],
+                $item['tier'],
+                $item['remaining_supply']
+            );
+            
+            if ($newCost !== null && $newCost != $item['current_cost_stars']) {
+                $db->query(
+                    "UPDATE season_vault SET current_cost_stars = ?, last_published_cost_stars = ?
+                     WHERE season_id = ? AND tier = ?",
+                    [$newCost, $newCost, $seasonId, $item['tier']]
+                );
+            }
+        }
+    }
+}

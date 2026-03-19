@@ -1,0 +1,1311 @@
+/**
+ * Too Many Coins - Game Client
+ * Complete JavaScript client for the economic competition game
+ */
+const TMC = {
+    // State
+    state: {
+        player: null,
+        seasons: [],
+        currentScreen: 'home',
+        currentSeason: null,
+        currentChat: 'GLOBAL',
+        gameState: null,
+        pollInterval: null,
+        chatPollInterval: null,
+        shopFilter: 'all',
+        cosmetics: [],
+        myCosmetics: [],
+    },
+
+    API_BASE: '/api/index.php',
+
+    // ==================== API ====================
+    async api(action, data = {}) {
+        try {
+            const token = localStorage.getItem('tmc_token');
+            const body = JSON.stringify({ action, ...data });
+            const resp = await fetch(this.API_BASE + '?action=' + action, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Session-Token': token || ''
+                },
+                body: body
+            });
+            const json = await resp.json();
+            if (json.error && json.error.includes('Authentication required')) {
+                this.handleLoggedOut();
+            }
+            return json;
+        } catch (e) {
+            console.error('API error:', e);
+            return { error: 'Network error. Please try again.' };
+        }
+    },
+
+    // ==================== INIT ====================
+    async init() {
+        // Check for stored session
+        const token = localStorage.getItem('tmc_token');
+        if (token) {
+            document.cookie = `tmc_session=${token}; path=/; max-age=86400`;
+        }
+
+        await this.refreshGameState();
+        this.renderUserArea();
+        this.navigate('home');
+
+        // Start polling
+        this.startPolling();
+    },
+
+    startPolling() {
+        if (this.state.pollInterval) clearInterval(this.state.pollInterval);
+        this.state.pollInterval = setInterval(() => this.refreshGameState(), 3000);
+    },
+
+    async refreshGameState() {
+        const gs = await this.api('game_state');
+        if (gs.error) return;
+        this.state.gameState = gs;
+        this.state.seasons = gs.seasons || [];
+        this.state.player = gs.player;
+        this.updateHUD();
+        this.checkIdleModal();
+
+        // Refresh current screen data (but don't re-render season detail to preserve input state)
+        if (this.state.currentScreen === 'seasons') this.renderSeasons();
+        if (this.state.currentScreen === 'season-detail' && this.state.currentSeason) {
+            this.updateSeasonDetailLive();
+        }
+        if (this.state.currentScreen === 'global-lb') this.loadGlobalLeaderboard();
+    },
+
+    // ==================== AUTH ====================
+    async login(e) {
+        e.preventDefault();
+        const email = document.getElementById('login-email').value;
+        const password = document.getElementById('login-password').value;
+        const result = await this.api('login', { email, password });
+        if (result.error) {
+            document.getElementById('login-error').textContent = result.error;
+            return;
+        }
+        localStorage.setItem('tmc_token', result.token);
+        document.cookie = `tmc_session=${result.token}; path=/; max-age=86400`;
+        this.toast('Welcome back, ' + result.handle + '!', 'success');
+        await this.refreshGameState();
+        this.renderUserArea();
+        this.navigate('home');
+    },
+
+    async register(e) {
+        e.preventDefault();
+        const handle = document.getElementById('reg-handle').value;
+        const email = document.getElementById('reg-email').value;
+        const password = document.getElementById('reg-password').value;
+        const result = await this.api('register', { handle, email, password });
+        if (result.error) {
+            document.getElementById('register-error').textContent = result.error;
+            return;
+        }
+        localStorage.setItem('tmc_token', result.token);
+        document.cookie = `tmc_session=${result.token}; path=/; max-age=86400`;
+        this.toast('Account created! Welcome, ' + result.handle + '!', 'success');
+        await this.refreshGameState();
+        this.renderUserArea();
+        this.navigate('home');
+    },
+
+    async logout() {
+        await this.api('logout');
+        localStorage.removeItem('tmc_token');
+        document.cookie = 'tmc_session=; path=/; max-age=0';
+        this.state.player = null;
+        this.state.gameState = null;
+        this.renderUserArea();
+        this.navigate('home');
+        this.toast('Logged out.', 'info');
+    },
+
+    handleLoggedOut() {
+        localStorage.removeItem('tmc_token');
+        this.state.player = null;
+        this.renderUserArea();
+    },
+
+    showAuthTab(tab) {
+        document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+        if (tab === 'login') {
+            document.getElementById('login-form').style.display = '';
+            document.getElementById('register-form').style.display = 'none';
+            document.querySelectorAll('.auth-tab')[0].classList.add('active');
+        } else {
+            document.getElementById('login-form').style.display = 'none';
+            document.getElementById('register-form').style.display = '';
+            document.querySelectorAll('.auth-tab')[1].classList.add('active');
+        }
+    },
+
+    // ==================== NAVIGATION ====================
+    navigate(screen, data) {
+        this.state.currentScreen = screen;
+
+        // Hide all screens
+        document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+
+        // Update nav
+        document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+        const navBtn = document.querySelector(`.nav-btn[data-screen="${screen}"]`);
+        if (navBtn) navBtn.classList.add('active');
+
+        // Show target screen
+        const el = document.getElementById('screen-' + screen);
+        if (el) el.classList.add('active');
+
+        // Screen-specific logic
+        switch (screen) {
+            case 'home':
+                this.renderHome();
+                break;
+            case 'auth':
+                break;
+            case 'seasons':
+                this.renderSeasons();
+                break;
+            case 'season-detail':
+                this.state.currentSeason = data;
+                this.loadSeasonDetail(data);
+                break;
+            case 'global-lb':
+                this.loadGlobalLeaderboard();
+                break;
+            case 'shop':
+                this.loadShop();
+                break;
+            case 'chat':
+                this.initChat();
+                break;
+            case 'profile':
+                this.loadProfile(data);
+                break;
+            case 'trade':
+                this.renderTradeScreen(data);
+                break;
+        }
+    },
+
+    // ==================== RENDER: USER AREA ====================
+    renderUserArea() {
+        const area = document.getElementById('user-area');
+        if (this.state.player) {
+            area.innerHTML = `
+                <div class="user-info">
+                    <span class="user-global-stars" title="Global Stars">&#11088; ${this.formatNumber(this.state.player.global_stars)}</span>
+                    <span class="user-handle" onclick="TMC.navigate('profile', ${this.state.player.player_id})">${this.escapeHtml(this.state.player.handle)}</span>
+                    <button class="btn btn-sm btn-outline" onclick="TMC.logout()">Logout</button>
+                </div>
+            `;
+        } else {
+            area.innerHTML = `
+                <button class="btn btn-primary btn-sm" onclick="TMC.navigate('auth')">Login / Register</button>
+            `;
+        }
+    },
+
+    // ==================== RENDER: HOME ====================
+    renderHome() {
+        const cta = document.getElementById('hero-cta');
+        if (this.state.player) {
+            if (this.state.player.joined_season_id) {
+                cta.innerHTML = `
+                    <button class="btn btn-primary btn-lg" onclick="TMC.navigate('season-detail', ${this.state.player.joined_season_id})">
+                        Go to Your Season
+                    </button>
+                `;
+            } else {
+                cta.innerHTML = `
+                    <button class="btn btn-primary btn-lg" onclick="TMC.navigate('seasons')">
+                        Browse Seasons
+                    </button>
+                `;
+            }
+        } else {
+            cta.innerHTML = `
+                <button class="btn btn-primary btn-lg" onclick="TMC.navigate('auth')">
+                    Get Started
+                </button>
+            `;
+        }
+    },
+
+    // ==================== RENDER: HUD ====================
+    updateHUD() {
+        const hud = document.getElementById('player-hud');
+        const p = this.state.player;
+        if (!p || !p.participation) {
+            hud.style.display = 'none';
+            return;
+        }
+        hud.style.display = '';
+        document.getElementById('hud-coins').textContent = this.formatNumber(p.participation.coins);
+        document.getElementById('hud-seasonal-stars').textContent = this.formatNumber(p.participation.seasonal_stars);
+        const totalSigils = p.participation.sigils.reduce((a, b) => a + b, 0);
+        document.getElementById('hud-sigils').textContent = totalSigils;
+        document.getElementById('hud-global-stars').textContent = this.formatNumber(p.global_stars);
+        document.getElementById('hud-activity').textContent = p.activity_state;
+        document.getElementById('hud-activity').className = 'hud-value activity-' + p.activity_state.toLowerCase();
+
+        // Boosts count and modifier
+        const boosts = p.active_boosts || { self: [], global: [], total_modifier_percent: 0 };
+        const boostCount = (boosts.self || []).length + (boosts.global || []).length;
+        const boostEl = document.getElementById('hud-boosts');
+        if (boostEl) {
+            if (boostCount > 0) {
+                boostEl.textContent = `${boostCount} (+${boosts.total_modifier_percent}%)`;
+                boostEl.className = 'hud-value boost-active';
+            } else {
+                boostEl.textContent = '0';
+                boostEl.className = 'hud-value';
+            }
+        }
+
+        // Check for new sigil drops and show notification
+        this.checkSigilDropNotifications(p);
+
+        // Find current season timer
+        const season = this.state.seasons.find(s => s.season_id == p.joined_season_id);
+        if (season) {
+            document.getElementById('hud-season-timer').textContent = season.time_remaining_formatted;
+        }
+    },
+
+    // Track last known drop count to detect new drops
+    _lastDropCount: 0,
+    checkSigilDropNotifications(p) {
+        const drops = p.recent_drops || [];
+        const currentCount = drops.length;
+        if (this._lastDropCount > 0 && currentCount > this._lastDropCount) {
+            // New drop(s) detected
+            const newDrops = drops.slice(0, currentCount - this._lastDropCount);
+            newDrops.forEach(d => {
+                const tierNames = ['', 'Common', 'Uncommon', 'Rare', 'Epic', 'Legendary'];
+                this.toast(`Sigil Drop! Tier ${d.tier} (${tierNames[d.tier]}) ${d.source === 'pity' ? '(Pity)' : ''}`, 'success');
+            });
+        }
+        this._lastDropCount = currentCount;
+    },
+
+    checkIdleModal() {
+        const modal = document.getElementById('idle-modal');
+        if (this.state.player && this.state.player.idle_modal_active) {
+            modal.style.display = 'flex';
+        } else {
+            modal.style.display = 'none';
+        }
+    },
+
+    async idleAck() {
+        const result = await this.api('idle_ack');
+        if (result.success) {
+            document.getElementById('idle-modal').style.display = 'none';
+            this.toast('Welcome back! You are now Active.', 'success');
+            await this.refreshGameState();
+        }
+    },
+
+    // ==================== RENDER: SEASONS ====================
+    renderSeasons() {
+        const container = document.getElementById('seasons-list');
+        if (!this.state.seasons || this.state.seasons.length === 0) {
+            container.innerHTML = '<div class="empty-state"><p>No seasons available yet. Check back soon!</p></div>';
+            return;
+        }
+
+        let html = '';
+        for (const s of this.state.seasons) {
+            const status = s.computed_status || s.status;
+            const statusClass = status.toLowerCase();
+            const canJoin = this.state.player && !this.state.player.joined_season_id &&
+                           (status === 'Active' || status === 'Blackout');
+            const isMyseason = this.state.player && this.state.player.joined_season_id == s.season_id;
+            const playerCount = s.player_count || 0;
+
+            html += `
+                <div class="season-card ${statusClass} ${isMyseason ? 'my-season' : ''}" onclick="TMC.navigate('season-detail', ${s.season_id})">
+                    <div class="season-card-header">
+                        <span class="season-id">Season #${s.season_id}</span>
+                        <span class="season-status badge badge-${statusClass}">${status}</span>
+                    </div>
+                    <div class="season-card-body">
+                        <div class="season-stat">
+                            <span class="stat-label">Players</span>
+                            <span class="stat-value">${playerCount}</span>
+                        </div>
+                        <div class="season-stat">
+                            <span class="stat-label">Star Price</span>
+                            <span class="stat-value">${this.formatNumber(s.current_star_price)} coins</span>
+                        </div>
+                        <div class="season-stat">
+                            <span class="stat-label">Time Left</span>
+                            <span class="stat-value">${s.time_remaining_formatted}</span>
+                        </div>
+                        <div class="season-stat">
+                            <span class="stat-label">Coin Supply</span>
+                            <span class="stat-value">${this.formatNumber(s.total_coins_supply)}</span>
+                        </div>
+                    </div>
+                    <div class="season-card-footer">
+                        ${isMyseason ? '<span class="badge badge-active">YOUR SEASON</span>' : ''}
+                        ${canJoin ? '<button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); TMC.joinSeason(' + s.season_id + ')">Join</button>' : ''}
+                        ${status === 'Expired' ? '<span class="badge badge-expired">Completed</span>' : ''}
+                    </div>
+                </div>
+            `;
+        }
+        container.innerHTML = html;
+    },
+
+    // ==================== SEASON DETAIL ====================
+    updateSeasonDetailLive() {
+        // Update dynamic values without re-rendering the entire season detail
+        const p = this.state.player;
+        if (!p || !p.participation) return;
+        const seasonId = this.state.currentSeason;
+        const season = this.state.seasons.find(s => s.season_id == seasonId);
+        if (!season) return;
+
+        // Update economy bar values if they exist
+        const econValues = document.querySelectorAll('.econ-value');
+        if (econValues.length >= 3) {
+            econValues[0].textContent = this.formatNumber(season.current_star_price) + ' coins';
+            econValues[1].textContent = this.formatNumber(season.total_coins_supply);
+            econValues[2].textContent = season.player_count || 0;
+        }
+
+        // Update timer
+        const timerValue = document.querySelector('.timer-value');
+        if (timerValue) timerValue.textContent = season.time_remaining_formatted || 'Ended';
+
+        // Update coin display in purchase panel
+        const panelInfos = document.querySelectorAll('.panel-info');
+        panelInfos.forEach(el => {
+            if (el.textContent.includes('Current price:')) {
+                el.innerHTML = `Current price: <strong>${this.formatNumber(season.current_star_price)} coins</strong> per star`;
+            }
+            if (el.textContent.includes('Your coins:')) {
+                el.innerHTML = `Your coins: <strong>${this.formatNumber(p.participation.coins)}</strong>`;
+            }
+        });
+
+        // Update sigil counts
+        const sigilCounts = document.querySelectorAll('.sigil-count');
+        if (sigilCounts.length === 5) {
+            p.participation.sigils.forEach((count, i) => {
+                sigilCounts[i].textContent = count;
+            });
+        }
+
+        // Update lock-in star count
+        const lockInBtn = document.querySelector('.panel-lockin .btn-danger');
+        if (lockInBtn) {
+            lockInBtn.textContent = `Lock-In (${this.formatNumber(p.participation.seasonal_stars)} Stars)`;
+        }
+
+        // Refresh leaderboard
+        this.loadSeasonLeaderboard(seasonId);
+    },
+
+    async loadSeasonDetail(seasonId) {
+        const detail = await this.api('season_detail', { season_id: seasonId });
+        if (detail.error) {
+            document.getElementById('season-detail-content').innerHTML =
+                `<div class="error-state"><p>${detail.error}</p></div>`;
+            return;
+        }
+        this.renderSeasonDetail(seasonId, detail);
+    },
+
+    renderSeasonDetail(seasonId, detail) {
+        if (!detail) {
+            // Use cached data from game state
+            detail = this.state.seasons.find(s => s.season_id == seasonId);
+            if (!detail) return;
+        }
+
+        const p = this.state.player;
+        const isParticipating = p && p.joined_season_id == seasonId;
+        const status = detail.computed_status || detail.status;
+        const isBlackout = status === 'Blackout';
+        const isExpired = status === 'Expired';
+
+        let html = `
+            <div class="season-header">
+                <div class="season-header-left">
+                    <h2>Season #${seasonId}</h2>
+                    <span class="badge badge-${status.toLowerCase()} badge-lg">${status}</span>
+                    ${isBlackout ? '<span class="badge badge-warning badge-lg">BLACKOUT - No new actions</span>' : ''}
+                </div>
+                <div class="season-header-right">
+                    <div class="season-timer">
+                        <span class="timer-label">${isExpired ? 'Ended' : 'Time Remaining'}</span>
+                        <span class="timer-value">${detail.time_remaining_formatted || 'Ended'}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="season-economy-bar">
+                <div class="economy-stat">
+                    <span class="econ-label">Star Price</span>
+                    <span class="econ-value">${this.formatNumber(detail.current_star_price)} coins</span>
+                </div>
+                <div class="economy-stat">
+                    <span class="econ-label">Coin Supply</span>
+                    <span class="econ-value">${this.formatNumber(detail.total_coins_supply)}</span>
+                </div>
+                <div class="economy-stat">
+                    <span class="econ-label">Players</span>
+                    <span class="econ-value">${detail.player_count || 0}</span>
+                </div>
+            </div>
+        `;
+
+        // Action panel (if participating)
+        if (isParticipating && !isExpired) {
+            const part = p.participation;
+            html += `
+                <div class="action-panels">
+                    <!-- Purchase Stars Panel -->
+                    <div class="action-panel">
+                        <h3>Purchase Seasonal Stars</h3>
+                        <p class="panel-info">Current price: <strong>${this.formatNumber(detail.current_star_price)} coins</strong> per star</p>
+                        <p class="panel-info">Your coins: <strong>${this.formatNumber(part.coins)}</strong></p>
+                        <div class="action-row">
+                            <input type="number" id="purchase-coins" min="1" placeholder="Coins to spend" class="input-field">
+                            <button class="btn btn-primary" onclick="TMC.purchaseStars()" ${isBlackout ? 'disabled' : ''}>Buy Stars</button>
+                        </div>
+                        <div class="quick-buy-row">
+                            <button class="btn btn-sm btn-outline" onclick="TMC.quickBuyStars(0.25)">25%</button>
+                            <button class="btn btn-sm btn-outline" onclick="TMC.quickBuyStars(0.5)">50%</button>
+                            <button class="btn btn-sm btn-outline" onclick="TMC.quickBuyStars(0.75)">75%</button>
+                            <button class="btn btn-sm btn-outline" onclick="TMC.quickBuyStars(1)">All</button>
+                        </div>
+                    </div>
+
+                    <!-- Sigils Panel -->
+                    <div class="action-panel">
+                        <h3>Your Sigils</h3>
+                        <div class="sigil-display">
+                            ${part.sigils.map((count, i) => `
+                                <div class="sigil-item tier-${i+1}">
+                                    <span class="sigil-tier">T${i+1}</span>
+                                    <span class="sigil-count">${count}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+
+                    <!-- Vault Panel -->
+                    <div class="action-panel">
+                        <h3>Sigil Vault</h3>
+                        <p class="panel-info">Purchase Sigils with Seasonal Stars</p>
+                        <div class="vault-grid">
+                            ${(detail.vault || []).map(v => `
+                                <div class="vault-item tier-${v.tier}">
+                                    <span class="vault-tier">Tier ${v.tier}</span>
+                                    <span class="vault-remaining">${v.remaining_supply}/${v.initial_supply} left</span>
+                                    <span class="vault-cost">${v.current_cost_stars} stars</span>
+                                    <button class="btn btn-sm btn-primary" 
+                                        onclick="TMC.purchaseVault(${v.tier})"
+                                        ${v.remaining_supply <= 0 || isBlackout ? 'disabled' : ''}>
+                                        ${v.remaining_supply <= 0 ? 'Sold Out' : 'Buy'}
+                                    </button>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+
+                    <!-- Boosts Panel -->
+                    <div class="action-panel panel-boosts">
+                        <h3>Boosts</h3>
+                        <p class="panel-info">Consume Sigils to activate temporary UBI modifiers.</p>
+                        <div id="active-boosts-display"></div>
+                        <div id="boost-catalog-grid" class="boost-catalog-grid"></div>
+                        <button class="btn btn-outline btn-sm" onclick="TMC.loadBoostCatalog()" ${isBlackout ? 'disabled' : ''}>Load Boost Catalog</button>
+                    </div>
+
+                    <!-- Sigil Drops Panel -->
+                    <div class="action-panel panel-drops">
+                        <h3>Sigil Drops</h3>
+                        <p class="panel-info">Sigils drop randomly while you're actively participating. Rarer tiers are much less likely.</p>
+                        <div class="drop-stats">
+                            <span class="drop-stat">Total Drops: <strong>${part.sigil_drops_total || 0}</strong></span>
+                            <span class="drop-stat">Ticks Since Last Drop: <strong>${this.formatNumber(part.eligible_ticks_since_last_drop || 0)}</strong></span>
+                        </div>
+                        <div id="recent-drops-list" class="recent-drops-list">
+                            ${(p.recent_drops || []).length > 0 ? 
+                                p.recent_drops.map(d => {
+                                    const tierNames = ['', 'Common', 'Uncommon', 'Rare', 'Epic', 'Legendary'];
+                                    const tierColors = ['', '#9ca3af', '#22c55e', '#3b82f6', '#a855f7', '#f59e0b'];
+                                    return `<div class="drop-entry tier-${d.tier}">
+                                        <span class="drop-tier" style="color:${tierColors[d.tier]}">T${d.tier} ${tierNames[d.tier]}</span>
+                                        <span class="drop-source">${d.source === 'pity' ? '(Pity)' : '(Random)'}</span>
+                                        <span class="drop-tick">Tick ${this.formatNumber(d.drop_tick)}</span>
+                                    </div>`;
+                                }).join('') :
+                                '<p class="empty-text">No drops yet. Keep participating!</p>'
+                            }
+                        </div>
+                        <div class="drop-odds-table">
+                            <h4>Drop Odds</h4>
+                            <table class="mini-table">
+                                <tr><td>Base Rate</td><td>1 in 50,000 per eligible tick</td></tr>
+                                <tr><td class="tier-1-text">Tier I</td><td>70%</td></tr>
+                                <tr><td class="tier-2-text">Tier II</td><td>20%</td></tr>
+                                <tr><td class="tier-3-text">Tier III</td><td>8%</td></tr>
+                                <tr><td class="tier-4-text">Tier IV</td><td>1.5%</td></tr>
+                                <tr><td class="tier-5-text">Tier V</td><td>0.5%</td></tr>
+                                <tr><td>Pity Timer</td><td>Guaranteed T1 after 120,000 ticks</td></tr>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Lock-In Panel -->
+                    <div class="action-panel panel-lockin">
+                        <h3>Lock-In</h3>
+                        <p class="panel-info">Exit the season early and convert <strong>${this.formatNumber(part.seasonal_stars)} Seasonal Stars</strong> to Global Stars.</p>
+                        <p class="panel-warning">This will destroy all your Coins, Sigils, and Boosts. This action is irreversible.</p>
+                        <button class="btn btn-danger btn-lg" onclick="TMC.confirmLockIn()" 
+                            ${!p.can_lock_in || isBlackout ? 'disabled' : ''}>
+                            Lock-In (${this.formatNumber(part.seasonal_stars)} Stars)
+                        </button>
+                    </div>
+
+                    <!-- Trade Panel -->
+                    <div class="action-panel">
+                        <h3>Trading</h3>
+                        <p class="panel-info">Trade Coins and Sigils with other players in this season.</p>
+                        <button class="btn btn-primary" onclick="TMC.navigate('trade', ${seasonId})" ${isBlackout ? 'disabled' : ''}>
+                            Open Trade Center
+                        </button>
+                        <div id="my-trades-list" class="trades-list"></div>
+                    </div>
+                </div>
+            `;
+        } else if (!isParticipating && !isExpired && this.state.player) {
+            html += `
+                <div class="join-panel">
+                    <h3>Join This Season</h3>
+                    <p>Start earning Coins through UBI and compete for the top of the leaderboard.</p>
+                    ${this.state.player.joined_season_id ? 
+                        '<p class="panel-warning">You are already participating in another season. Lock-In or wait for it to end first.</p>' :
+                        `<button class="btn btn-primary btn-lg" onclick="TMC.joinSeason(${seasonId})">Join Season #${seasonId}</button>`
+                    }
+                </div>
+            `;
+        }
+
+        // Leaderboard
+        html += `
+            <div class="season-leaderboard">
+                <h3>Season Leaderboard</h3>
+                <table class="leaderboard-table">
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            <th>Player</th>
+                            <th>Seasonal Stars</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="season-lb-body">
+                    </tbody>
+                </table>
+                <div id="season-lb-empty" class="empty-state" style="display:none;">
+                    <p>No ranked players yet.</p>
+                </div>
+            </div>
+        `;
+
+        document.getElementById('season-detail-content').innerHTML = html;
+
+        // Load leaderboard
+        this.loadSeasonLeaderboard(seasonId);
+
+        // Load trades if participating
+        if (isParticipating) this.loadMyTrades();
+    },
+
+    async loadSeasonLeaderboard(seasonId) {
+        const lb = await this.api('leaderboard', { season_id: seasonId });
+        const body = document.getElementById('season-lb-body');
+        const empty = document.getElementById('season-lb-empty');
+        if (!body) return;
+
+        if (!lb || lb.length === 0 || lb.error) {
+            body.innerHTML = '';
+            if (empty) empty.style.display = '';
+            return;
+        }
+        if (empty) empty.style.display = 'none';
+
+        body.innerHTML = lb.map((entry, i) => {
+            const rank = entry.final_rank || (i + 1);
+            const isLockedIn = entry.lock_in_effect_tick !== null;
+            const isMe = this.state.player && entry.player_id == this.state.player.player_id;
+            let statusBadge = '';
+            if (entry.badge_awarded) {
+                const badgeEmoji = { first: '&#129351;', second: '&#129352;', third: '&#129353;' };
+                statusBadge = `<span class="badge badge-${entry.badge_awarded}">${badgeEmoji[entry.badge_awarded] || ''}</span>`;
+            } else if (isLockedIn) {
+                statusBadge = '<span class="badge badge-lockin">Locked In</span>';
+            } else if (entry.end_membership) {
+                statusBadge = '<span class="badge badge-ended">End-Finisher</span>';
+            }
+
+            return `
+                <tr class="${isMe ? 'my-row' : ''} ${rank <= 3 ? 'top-three' : ''}">
+                    <td class="rank-cell">${rank <= 3 ? ['&#129351;', '&#129352;', '&#129353;'][rank-1] : rank}</td>
+                    <td class="player-cell">
+                        <span class="player-link" onclick="TMC.navigate('profile', ${entry.player_id})">${this.escapeHtml(entry.handle)}</span>
+                    </td>
+                    <td class="stars-cell">${this.formatNumber(entry.seasonal_stars)}</td>
+                    <td class="status-cell">${statusBadge}</td>
+                </tr>
+            `;
+        }).join('');
+    },
+
+    // ==================== ACTIONS ====================
+    async joinSeason(seasonId) {
+        if (!this.state.player) {
+            this.navigate('auth');
+            return;
+        }
+        const result = await this.api('season_join', { season_id: seasonId });
+        if (result.error) {
+            this.toast(result.error, 'error');
+            return;
+        }
+        this.toast('Joined the season! Start earning Coins.', 'success');
+        await this.refreshGameState();
+        this.navigate('season-detail', seasonId);
+    },
+
+    async purchaseStars() {
+        const input = document.getElementById('purchase-coins');
+        const coins = parseInt(input.value);
+        if (!coins || coins <= 0) {
+            this.toast('Enter a valid amount of coins.', 'error');
+            return;
+        }
+        const result = await this.api('purchase_stars', { coins_to_spend: coins });
+        if (result.error) {
+            this.toast(result.error, 'error');
+            return;
+        }
+        this.toast(`Purchased ${this.formatNumber(result.stars_purchased)} stars for ${this.formatNumber(result.coins_spent)} coins!`, 'success');
+        input.value = '';
+        await this.refreshGameState();
+    },
+
+    quickBuyStars(fraction) {
+        if (!this.state.player || !this.state.player.participation) return;
+        const coins = Math.floor(this.state.player.participation.coins * fraction);
+        document.getElementById('purchase-coins').value = coins;
+    },
+
+    async purchaseVault(tier) {
+        const result = await this.api('purchase_vault', { tier });
+        if (result.error) {
+            this.toast(result.error, 'error');
+            return;
+        }
+        this.toast(`Purchased Tier ${tier} Sigil for ${result.cost_stars} stars!`, 'success');
+        await this.refreshGameState();
+        if (this.state.currentSeason) this.loadSeasonDetail(this.state.currentSeason);
+    },
+
+    // ==================== BOOSTS ====================
+    _boostCatalog: null,
+
+    async loadBoostCatalog() {
+        const catalog = await this.api('boost_catalog');
+        if (catalog.error) {
+            this.toast(catalog.error, 'error');
+            return;
+        }
+        this._boostCatalog = catalog;
+        this.renderBoostCatalog();
+        this.renderActiveBoosts();
+    },
+
+    renderBoostCatalog() {
+        const grid = document.getElementById('boost-catalog-grid');
+        if (!grid || !this._boostCatalog) return;
+
+        const p = this.state.player;
+        const part = p ? p.participation : null;
+        const tierNames = ['', 'Common', 'Uncommon', 'Rare', 'Epic', 'Legendary'];
+        const tierIcons = ['', '&#9672;', '&#9670;', '&#9733;', '&#10038;', '&#9830;'];
+
+        grid.innerHTML = `<h4>Available Boosts</h4>` + this._boostCatalog.map(b => {
+            const tier = parseInt(b.tier_required);
+            const hasSigil = part && part.sigils[tier - 1] >= parseInt(b.sigil_cost);
+            const modPercent = (parseInt(b.modifier_fp) / 10000).toFixed(1);
+            const durationMin = Math.round(parseInt(b.duration_ticks) / 60);
+            const scopeLabel = b.scope === 'GLOBAL' ? 'All Players' : 'Self Only';
+            const scopeClass = b.scope === 'GLOBAL' ? 'scope-global' : 'scope-self';
+
+            return `
+                <div class="boost-card tier-${tier} ${hasSigil ? '' : 'boost-locked'}">
+                    <div class="boost-card-header">
+                        <span class="boost-icon">${b.icon || tierIcons[tier]}</span>
+                        <span class="boost-name">${this.escapeHtml(b.name)}</span>
+                    </div>
+                    <p class="boost-desc">${this.escapeHtml(b.description)}</p>
+                    <div class="boost-stats">
+                        <span class="boost-modifier">+${modPercent}% UBI</span>
+                        <span class="boost-duration">${durationMin} min</span>
+                        <span class="boost-scope ${scopeClass}">${scopeLabel}</span>
+                    </div>
+                    <div class="boost-cost">
+                        <span>Cost: ${b.sigil_cost} Tier ${tier} Sigil${parseInt(b.sigil_cost) > 1 ? 's' : ''}</span>
+                        <span class="boost-have">(You have: ${part ? part.sigils[tier-1] : 0})</span>
+                    </div>
+                    <button class="btn btn-sm ${hasSigil ? 'btn-primary' : 'btn-outline'}" 
+                        onclick="TMC.activateBoost(${b.boost_id})" 
+                        ${!hasSigil ? 'disabled title="Not enough Sigils"' : ''}>
+                        Activate
+                    </button>
+                </div>
+            `;
+        }).join('');
+    },
+
+    renderActiveBoosts() {
+        const container = document.getElementById('active-boosts-display');
+        if (!container) return;
+
+        const p = this.state.player;
+        const boosts = p ? p.active_boosts : null;
+        if (!boosts || ((boosts.self || []).length === 0 && (boosts.global || []).length === 0)) {
+            container.innerHTML = '<p class="empty-text">No active boosts.</p>';
+            return;
+        }
+
+        const gameTime = boosts.server_now || 0;
+        let html = `<div class="active-boosts-summary">
+            <span class="boost-total-mod">Total UBI Modifier: <strong>+${boosts.total_modifier_percent}%</strong></span>
+        </div>`;
+
+        const renderBoost = (b, type) => {
+            const remaining = Math.max(0, parseInt(b.expires_tick) - gameTime);
+            const remainingMin = Math.round(remaining / 60);
+            const modPercent = (parseInt(b.modifier_fp) / 10000).toFixed(1);
+            return `<div class="active-boost-item ${type}">
+                <span class="ab-name">${this.escapeHtml(b.name)}</span>
+                <span class="ab-mod">+${modPercent}%</span>
+                <span class="ab-time">${remainingMin}m left</span>
+                ${type === 'global' ? `<span class="ab-by">by ${this.escapeHtml(b.activator_handle || '')}</span>` : ''}
+            </div>`;
+        };
+
+        if (boosts.self.length > 0) {
+            html += '<div class="ab-section"><h4>Your Boosts</h4>' + boosts.self.map(b => renderBoost(b, 'self')).join('') + '</div>';
+        }
+        if (boosts.global.length > 0) {
+            html += '<div class="ab-section"><h4>Season-Wide Boosts</h4>' + boosts.global.map(b => renderBoost(b, 'global')).join('') + '</div>';
+        }
+
+        container.innerHTML = html;
+    },
+
+    async activateBoost(boostId) {
+        const boost = this._boostCatalog ? this._boostCatalog.find(b => b.boost_id == boostId) : null;
+        const name = boost ? boost.name : `Boost #${boostId}`;
+        if (!confirm(`Activate ${name}?\n\nThis will consume ${boost ? boost.sigil_cost : 1} Tier ${boost ? boost.tier_required : '?'} Sigil(s).`)) {
+            return;
+        }
+
+        const result = await this.api('purchase_boost', { boost_id: boostId });
+        if (result.error) {
+            this.toast(result.error, 'error');
+            return;
+        }
+        this.toast(result.message, 'success');
+        await this.refreshGameState();
+        this.loadBoostCatalog();
+    },
+
+    confirmLockIn() {
+        const stars = this.state.player.participation.seasonal_stars;
+        if (!confirm(`Are you sure you want to Lock-In?\n\nThis will:\n- Convert ${this.formatNumber(stars)} Seasonal Stars to Global Stars\n- Destroy ALL your Coins, Sigils, and Boosts\n- Remove you from this season\n\nThis action is IRREVERSIBLE.`)) {
+            return;
+        }
+        this.lockIn();
+    },
+
+    async lockIn() {
+        const result = await this.api('lock_in');
+        if (result.error) {
+            this.toast(result.error, 'error');
+            return;
+        }
+        this.toast(result.message, 'success');
+        await this.refreshGameState();
+        this.navigate('home');
+    },
+
+    // ==================== GLOBAL LEADERBOARD ====================
+    async loadGlobalLeaderboard() {
+        const lb = await this.api('global_leaderboard');
+        const body = document.getElementById('global-lb-body');
+        const empty = document.getElementById('global-lb-empty');
+
+        if (!lb || lb.length === 0 || lb.error) {
+            body.innerHTML = '';
+            empty.style.display = '';
+            return;
+        }
+        empty.style.display = 'none';
+
+        body.innerHTML = lb.map((entry, i) => {
+            const rank = i + 1;
+            const isMe = this.state.player && entry.player_id == this.state.player.player_id;
+            return `
+                <tr class="${isMe ? 'my-row' : ''} ${rank <= 3 ? 'top-three' : ''}">
+                    <td class="rank-cell">${rank <= 3 ? ['&#129351;', '&#129352;', '&#129353;'][rank-1] : rank}</td>
+                    <td class="player-cell">
+                        <span class="player-link" onclick="TMC.navigate('profile', ${entry.player_id})">${this.escapeHtml(entry.handle)}</span>
+                    </td>
+                    <td class="stars-cell">${this.formatNumber(entry.global_stars)}</td>
+                </tr>
+            `;
+        }).join('');
+    },
+
+    // ==================== SHOP ====================
+    async loadShop() {
+        const catalog = await this.api('cosmetic_catalog');
+        if (catalog.error) return;
+        this.state.cosmetics = catalog;
+
+        if (this.state.player) {
+            const mine = await this.api('my_cosmetics');
+            if (!mine.error) this.state.myCosmetics = mine;
+        }
+
+        this.renderShop();
+    },
+
+    filterShop(category) {
+        this.state.shopFilter = category;
+        document.querySelectorAll('.shop-tab').forEach(t => t.classList.remove('active'));
+        event.target.classList.add('active');
+        this.renderShop();
+    },
+
+    renderShop() {
+        const grid = document.getElementById('shop-grid');
+        let items = this.state.cosmetics;
+        if (this.state.shopFilter !== 'all') {
+            items = items.filter(c => c.category === this.state.shopFilter);
+        }
+
+        const ownedIds = new Set(this.state.myCosmetics.map(c => c.cosmetic_id));
+
+        grid.innerHTML = items.map(c => {
+            const owned = ownedIds.has(c.cosmetic_id);
+            const canAfford = this.state.player && this.state.player.global_stars >= c.price_global_stars;
+            const categoryLabel = c.category.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+
+            return `
+                <div class="shop-item ${owned ? 'owned' : ''} ${c.css_class || ''}">
+                    <div class="shop-item-header">
+                        <span class="shop-item-name">${this.escapeHtml(c.name)}</span>
+                        <span class="shop-item-category">${categoryLabel}</span>
+                    </div>
+                    <p class="shop-item-desc">${this.escapeHtml(c.description || '')}</p>
+                    <div class="shop-item-footer">
+                        <span class="shop-item-price">&#11088; ${c.price_global_stars}</span>
+                        ${owned ? 
+                            '<span class="badge badge-owned">Owned</span>' :
+                            (this.state.player ? 
+                                `<button class="btn btn-sm btn-primary" onclick="TMC.buyCosmetic(${c.cosmetic_id})" ${!canAfford ? 'disabled title="Not enough Global Stars"' : ''}>Buy</button>` :
+                                '<span class="shop-item-login">Login to purchase</span>'
+                            )
+                        }
+                    </div>
+                </div>
+            `;
+        }).join('');
+    },
+
+    async buyCosmetic(cosmeticId) {
+        const cosmetic = this.state.cosmetics.find(c => c.cosmetic_id == cosmeticId);
+        if (!confirm(`Purchase "${cosmetic.name}" for ${cosmetic.price_global_stars} Global Stars?`)) return;
+
+        const result = await this.api('purchase_cosmetic', { cosmetic_id: cosmeticId });
+        if (result.error) {
+            this.toast(result.error, 'error');
+            return;
+        }
+        this.toast('Cosmetic purchased!', 'success');
+        await this.refreshGameState();
+        this.loadShop();
+    },
+
+    // ==================== TRADE ====================
+    async renderTradeScreen(seasonId) {
+        const content = document.getElementById('trade-content');
+        if (!this.state.player || !this.state.player.joined_season_id) {
+            content.innerHTML = '<div class="error-state"><p>You must be in a season to trade.</p></div>';
+            return;
+        }
+
+        // Get players in season
+        const players = await this.api('season_players', { season_id: seasonId });
+        const otherPlayers = (players || []).filter(p => p.player_id != this.state.player.player_id);
+
+        const part = this.state.player.participation;
+
+        content.innerHTML = `
+            <h2>Trade Center</h2>
+            <button class="btn btn-outline btn-sm" onclick="TMC.navigate('season-detail', ${seasonId})">Back to Season</button>
+
+            <div class="trade-form-container">
+                <h3>Create New Trade</h3>
+                <div class="trade-form">
+                    <div class="trade-side">
+                        <h4>You Offer</h4>
+                        <div class="form-group">
+                            <label>Coins (you have ${this.formatNumber(part.coins)})</label>
+                            <input type="number" id="trade-a-coins" min="0" max="${part.coins}" value="0" class="input-field">
+                        </div>
+                        ${part.sigils.map((count, i) => `
+                            <div class="form-group">
+                                <label>Tier ${i+1} Sigils (you have ${count})</label>
+                                <input type="number" id="trade-a-sigil-${i}" min="0" max="${count}" value="0" class="input-field input-sm">
+                            </div>
+                        `).join('')}
+                    </div>
+                    <div class="trade-arrow">&#8644;</div>
+                    <div class="trade-side">
+                        <h4>You Request</h4>
+                        <div class="form-group">
+                            <label>Coins</label>
+                            <input type="number" id="trade-b-coins" min="0" value="0" class="input-field">
+                        </div>
+                        ${[1,2,3,4,5].map(t => `
+                            <div class="form-group">
+                                <label>Tier ${t} Sigils</label>
+                                <input type="number" id="trade-b-sigil-${t-1}" min="0" value="0" class="input-field input-sm">
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Send To</label>
+                    <select id="trade-target" class="input-field">
+                        <option value="">Select a player...</option>
+                        ${otherPlayers.map(p => `<option value="${p.player_id}">${this.escapeHtml(p.handle)} ${p.online_current ? '(online)' : ''}</option>`).join('')}
+                    </select>
+                </div>
+                <button class="btn btn-primary btn-lg" onclick="TMC.submitTrade()">Send Trade Offer</button>
+            </div>
+
+            <div class="my-trades-section">
+                <h3>Your Trades</h3>
+                <div id="trade-list"></div>
+            </div>
+        `;
+
+        this.loadMyTrades();
+    },
+
+    async submitTrade() {
+        const targetId = document.getElementById('trade-target').value;
+        if (!targetId) {
+            this.toast('Select a player to trade with.', 'error');
+            return;
+        }
+
+        const sideACoins = parseInt(document.getElementById('trade-a-coins').value) || 0;
+        const sideASigils = [0,1,2,3,4].map(i => parseInt(document.getElementById(`trade-a-sigil-${i}`).value) || 0);
+        const sideBCoins = parseInt(document.getElementById('trade-b-coins').value) || 0;
+        const sideBSigils = [0,1,2,3,4].map(i => parseInt(document.getElementById(`trade-b-sigil-${i}`).value) || 0);
+
+        const result = await this.api('trade_initiate', {
+            acceptor_id: parseInt(targetId),
+            side_a_coins: sideACoins,
+            side_a_sigils: sideASigils,
+            side_b_coins: sideBCoins,
+            side_b_sigils: sideBSigils
+        });
+
+        if (result.error) {
+            this.toast(result.error, 'error');
+            return;
+        }
+        this.toast(`Trade offer sent! Fee: ${this.formatNumber(result.fee)} coins.`, 'success');
+        await this.refreshGameState();
+        this.loadMyTrades();
+    },
+
+    async loadMyTrades() {
+        const trades = await this.api('my_trades');
+        const container = document.getElementById('trade-list') || document.getElementById('my-trades-list');
+        if (!container || !trades || trades.error) return;
+
+        if (trades.length === 0) {
+            container.innerHTML = '<p class="empty-text">No trades yet.</p>';
+            return;
+        }
+
+        container.innerHTML = trades.map(t => {
+            const isInitiator = t.initiator_id == this.state.player.player_id;
+            const otherHandle = isInitiator ? t.acceptor_handle : t.initiator_handle;
+            const sideASigils = JSON.parse(t.side_a_sigils || '[]');
+            const sideBSigils = JSON.parse(t.side_b_sigils || '[]');
+
+            let actions = '';
+            if (t.status === 'OPEN') {
+                if (isInitiator) {
+                    actions = `<button class="btn btn-sm btn-danger" onclick="TMC.cancelTrade(${t.trade_id})">Cancel</button>`;
+                } else {
+                    actions = `
+                        <button class="btn btn-sm btn-primary" onclick="TMC.acceptTrade(${t.trade_id})">Accept</button>
+                        <button class="btn btn-sm btn-danger" onclick="TMC.declineTrade(${t.trade_id})">Decline</button>
+                    `;
+                }
+            }
+
+            return `
+                <div class="trade-item trade-${t.status.toLowerCase()}">
+                    <div class="trade-item-header">
+                        <span class="trade-with">${isInitiator ? 'To' : 'From'}: ${this.escapeHtml(otherHandle)}</span>
+                        <span class="badge badge-${t.status.toLowerCase()}">${t.status}</span>
+                    </div>
+                    <div class="trade-item-body">
+                        <div class="trade-offer">
+                            <span class="trade-label">Offer:</span>
+                            ${t.side_a_coins > 0 ? `<span>${this.formatNumber(t.side_a_coins)} coins</span>` : ''}
+                            ${sideASigils.some(s => s > 0) ? `<span>Sigils: [${sideASigils.join(',')}]</span>` : ''}
+                        </div>
+                        <div class="trade-request">
+                            <span class="trade-label">Request:</span>
+                            ${t.side_b_coins > 0 ? `<span>${this.formatNumber(t.side_b_coins)} coins</span>` : ''}
+                            ${sideBSigils.some(s => s > 0) ? `<span>Sigils: [${sideBSigils.join(',')}]</span>` : ''}
+                        </div>
+                        <div class="trade-fee">Fee: ${this.formatNumber(t.locked_fee_coins)} coins</div>
+                    </div>
+                    <div class="trade-item-actions">${actions}</div>
+                </div>
+            `;
+        }).join('');
+    },
+
+    async acceptTrade(tradeId) {
+        const result = await this.api('trade_accept', { trade_id: tradeId });
+        if (result.error) { this.toast(result.error, 'error'); return; }
+        this.toast('Trade completed!', 'success');
+        await this.refreshGameState();
+        this.loadMyTrades();
+    },
+
+    async cancelTrade(tradeId) {
+        const result = await this.api('trade_cancel', { trade_id: tradeId });
+        if (result.error) { this.toast(result.error, 'error'); return; }
+        this.toast('Trade canceled.', 'info');
+        await this.refreshGameState();
+        this.loadMyTrades();
+    },
+
+    async declineTrade(tradeId) {
+        const result = await this.api('trade_decline', { trade_id: tradeId });
+        if (result.error) { this.toast(result.error, 'error'); return; }
+        this.toast('Trade declined.', 'info');
+        await this.refreshGameState();
+        this.loadMyTrades();
+    },
+
+    // ==================== CHAT ====================
+    initChat() {
+        // Show season tab if in a season
+        const seasonTab = document.getElementById('chat-season-tab');
+        if (this.state.player && this.state.player.joined_season_id) {
+            seasonTab.style.display = '';
+        } else {
+            seasonTab.style.display = 'none';
+        }
+
+        // Show input if logged in
+        const inputArea = document.getElementById('chat-input-area');
+        inputArea.style.display = this.state.player ? '' : 'none';
+
+        this.loadChat();
+
+        // Start chat polling
+        if (this.state.chatPollInterval) clearInterval(this.state.chatPollInterval);
+        this.state.chatPollInterval = setInterval(() => {
+            if (this.state.currentScreen === 'chat') this.loadChat();
+        }, 5000);
+    },
+
+    switchChat(channel) {
+        this.state.currentChat = channel;
+        document.querySelectorAll('.chat-tab').forEach(t => t.classList.remove('active'));
+        event.target.classList.add('active');
+        this.loadChat();
+    },
+
+    async loadChat() {
+        const params = { channel: this.state.currentChat };
+        if (this.state.currentChat === 'SEASON' && this.state.player) {
+            params.season_id = this.state.player.joined_season_id;
+        }
+        const messages = await this.api('chat_messages', params);
+        const container = document.getElementById('chat-messages');
+
+        if (!messages || messages.error || messages.length === 0) {
+            container.innerHTML = '<div class="chat-empty">No messages yet. Be the first to say something!</div>';
+            return;
+        }
+
+        // Reverse to show oldest first
+        const sorted = [...messages].reverse();
+        container.innerHTML = sorted.map(m => {
+            const isMe = this.state.player && m.sender_id == this.state.player.player_id;
+            const isAdmin = m.is_admin_post;
+            return `
+                <div class="chat-msg ${isMe ? 'chat-msg-mine' : ''} ${isAdmin ? 'chat-msg-admin' : ''}">
+                    <span class="chat-handle ${isAdmin ? 'admin-handle' : ''}" onclick="TMC.navigate('profile', ${m.sender_id})">
+                        ${isAdmin ? '[ADMIN] ' : ''}${this.escapeHtml(m.handle_snapshot)}
+                    </span>
+                    <span class="chat-text">${this.escapeHtml(m.content)}</span>
+                    <span class="chat-time">${this.formatChatTime(m.created_at)}</span>
+                </div>
+            `;
+        }).join('');
+
+        container.scrollTop = container.scrollHeight;
+    },
+
+    async sendChat() {
+        const input = document.getElementById('chat-input');
+        const content = input.value.trim();
+        if (!content) return;
+
+        const params = { channel: this.state.currentChat, content };
+        if (this.state.currentChat === 'SEASON') {
+            params.season_id = this.state.player.joined_season_id;
+        }
+
+        const result = await this.api('chat_send', params);
+        if (result.error) {
+            this.toast(result.error, 'error');
+            return;
+        }
+        input.value = '';
+        this.loadChat();
+    },
+
+    // ==================== PROFILE ====================
+    async loadProfile(playerId) {
+        const profile = await this.api('profile', { player_id: playerId });
+        const content = document.getElementById('profile-content');
+
+        if (profile.error) {
+            content.innerHTML = `<div class="error-state"><p>${profile.error}</p></div>`;
+            return;
+        }
+
+        if (profile.deleted) {
+            content.innerHTML = `<div class="profile-card"><h2>[Removed]</h2><p>This account has been deleted.</p></div>`;
+            return;
+        }
+
+        const badges = (profile.badges || []).map(b => {
+            const icons = {
+                seasonal_first: '&#129351;', seasonal_second: '&#129352;', seasonal_third: '&#129353;',
+                yearly_top10: '&#127942;'
+            };
+            return `<span class="profile-badge" title="${b.badge_type}">${icons[b.badge_type] || '&#127775;'}</span>`;
+        }).join('');
+
+        const history = (profile.season_history || []).map(h => `
+            <tr>
+                <td>Season #${h.season_id}</td>
+                <td>${this.formatNumber(h.final_seasonal_stars || h.seasonal_stars || 0)}</td>
+                <td>${h.final_rank || '-'}</td>
+                <td>${this.formatNumber(h.global_stars_earned || 0)}</td>
+                <td>${h.lock_in_effect_tick ? 'Lock-In' : (h.end_membership ? 'End-Finisher' : '-')}</td>
+            </tr>
+        `).join('');
+
+        content.innerHTML = `
+            <div class="profile-card">
+                <div class="profile-header">
+                    <h2>${this.escapeHtml(profile.handle)}</h2>
+                    ${profile.role !== 'Player' ? `<span class="badge badge-staff">${profile.role}</span>` : ''}
+                </div>
+                <div class="profile-stats">
+                    <div class="profile-stat">
+                        <span class="stat-label">Global Stars</span>
+                        <span class="stat-value">&#11088; ${this.formatNumber(profile.global_stars)}</span>
+                    </div>
+                    <div class="profile-stat">
+                        <span class="stat-label">Member Since</span>
+                        <span class="stat-value">${new Date(profile.created_at).toLocaleDateString()}</span>
+                    </div>
+                </div>
+                ${badges ? `<div class="profile-badges"><h3>Badges</h3><div class="badges-row">${badges}</div></div>` : ''}
+                ${history ? `
+                    <div class="profile-history">
+                        <h3>Season History</h3>
+                        <table class="leaderboard-table">
+                            <thead><tr><th>Season</th><th>Stars</th><th>Rank</th><th>Global Earned</th><th>Exit</th></tr></thead>
+                            <tbody>${history}</tbody>
+                        </table>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    },
+
+    // ==================== UTILITIES ====================
+    formatNumber(n) {
+        if (n === null || n === undefined) return '0';
+        return Number(n).toLocaleString();
+    },
+
+    escapeHtml(str) {
+        if (!str) return '';
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    },
+
+    formatChatTime(dateStr) {
+        const d = new Date(dateStr);
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    },
+
+    toast(message, type = 'info') {
+        const container = document.getElementById('toast-container');
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type}`;
+        toast.textContent = message;
+        container.appendChild(toast);
+        setTimeout(() => toast.classList.add('toast-show'), 10);
+        setTimeout(() => {
+            toast.classList.remove('toast-show');
+            setTimeout(() => toast.remove(), 300);
+        }, 4000);
+    }
+};
+
+// Initialize on load
+document.addEventListener('DOMContentLoaded', () => TMC.init());

@@ -1,0 +1,95 @@
+-- Migration: Add Boost system and Sigil drop tracking
+-- Too Many Coins
+
+USE too_many_coins;
+
+-- ============================================================
+-- BOOST CATALOG (per-season configurable boost types)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS boost_catalog (
+    boost_id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    description TEXT NOT NULL,
+    tier_required TINYINT UNSIGNED NOT NULL,  -- Sigil tier needed (1-5)
+    sigil_cost INT NOT NULL DEFAULT 1,        -- Number of sigils consumed
+    scope ENUM('SELF', 'GLOBAL') NOT NULL DEFAULT 'SELF',
+    duration_ticks BIGINT NOT NULL DEFAULT 3600,  -- How long the boost lasts
+    modifier_id INT UNSIGNED NOT NULL,         -- Links to UBI modifier system
+    modifier_fp INT NOT NULL DEFAULT 0,        -- Fixed-point modifier value (added to UBI multiplier)
+    max_stack INT NOT NULL DEFAULT 1,          -- Max concurrent activations of this boost per player
+    icon VARCHAR(50) DEFAULT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+-- ============================================================
+-- ACTIVE BOOSTS (per player per season)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS active_boosts (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    player_id BIGINT UNSIGNED NOT NULL,
+    season_id BIGINT UNSIGNED NOT NULL,
+    boost_id INT UNSIGNED NOT NULL,
+    scope ENUM('SELF', 'GLOBAL') NOT NULL DEFAULT 'SELF',
+    modifier_fp INT NOT NULL DEFAULT 0,
+    activated_tick BIGINT NOT NULL,
+    expires_tick BIGINT NOT NULL,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    INDEX idx_player_season (player_id, season_id, is_active),
+    INDEX idx_season_active (season_id, is_active, expires_tick),
+    INDEX idx_scope (season_id, scope, is_active),
+    FOREIGN KEY (player_id) REFERENCES players(player_id),
+    FOREIGN KEY (season_id) REFERENCES seasons(season_id),
+    FOREIGN KEY (boost_id) REFERENCES boost_catalog(boost_id)
+) ENGINE=InnoDB;
+
+-- ============================================================
+-- SIGIL DROP TRACKING (pity counter + throttle window)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS sigil_drop_tracking (
+    player_id BIGINT UNSIGNED NOT NULL,
+    season_id BIGINT UNSIGNED NOT NULL,
+    eligible_ticks_since_last_drop BIGINT NOT NULL DEFAULT 0,
+    total_drops INT NOT NULL DEFAULT 0,
+    last_drop_tick BIGINT DEFAULT NULL,
+    PRIMARY KEY (player_id, season_id),
+    FOREIGN KEY (player_id) REFERENCES players(player_id),
+    FOREIGN KEY (season_id) REFERENCES seasons(season_id)
+) ENGINE=InnoDB;
+
+-- Rolling window drop log for throttle enforcement
+CREATE TABLE IF NOT EXISTS sigil_drop_log (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    player_id BIGINT UNSIGNED NOT NULL,
+    season_id BIGINT UNSIGNED NOT NULL,
+    drop_tick BIGINT NOT NULL,
+    tier TINYINT UNSIGNED NOT NULL,
+    source ENUM('RNG', 'PITY') NOT NULL DEFAULT 'RNG',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_player_season_tick (player_id, season_id, drop_tick),
+    FOREIGN KEY (player_id) REFERENCES players(player_id),
+    FOREIGN KEY (season_id) REFERENCES seasons(season_id)
+) ENGINE=InnoDB;
+
+-- ============================================================
+-- SEED DEFAULT BOOST CATALOG
+-- ============================================================
+
+INSERT INTO boost_catalog (name, description, tier_required, sigil_cost, scope, duration_ticks, modifier_id, modifier_fp, max_stack, icon) VALUES
+-- Tier I: Minor self UBI boost
+('Coin Trickle', 'A gentle stream of extra coins flows your way. Increases your UBI by 10% for 1 hour.', 1, 1, 'SELF', 3600, 1, 100000, 3, 'trickle'),
+-- Tier II: Moderate self UBI boost
+('Coin Surge', 'A powerful surge of economic energy. Increases your UBI by 25% for 2 hours.', 2, 1, 'SELF', 7200, 2, 250000, 2, 'surge'),
+-- Tier III: Strong self UBI boost
+('Golden Flow', 'Liquid gold courses through your economy. Increases your UBI by 50% for 3 hours.', 3, 1, 'SELF', 10800, 3, 500000, 1, 'golden'),
+-- Tier IV: Global UBI boost (affects all participants)
+('Rising Tide', 'A rising tide lifts all boats. Increases UBI by 15% for ALL season participants for 1 hour.', 4, 1, 'GLOBAL', 3600, 4, 150000, 1, 'tide'),
+-- Tier V: Powerful global UBI boost
+('Golden Age', 'An era of unprecedented prosperity dawns. Increases UBI by 30% for ALL season participants for 2 hours.', 5, 1, 'GLOBAL', 7200, 5, 300000, 1, 'age');
+
+-- Add columns to season_participation for drop tracking integration
+ALTER TABLE season_participation 
+    ADD COLUMN IF NOT EXISTS eligible_ticks_since_last_drop BIGINT NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS sigil_drops_total INT NOT NULL DEFAULT 0;
