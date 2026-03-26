@@ -54,7 +54,13 @@ if ($earlyAction === 'init_db') {
     require_once __DIR__ . '/../init_db.php';
     exit;
 }
+$path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 
+// Must run before server_state check
+if ($path === '/api/init_db') {
+ require __DIR__ . '/../init_db.php';
+ exit;
+}
 // Initialize server state if needed
 $db = Database::getInstance();
 $serverState = $db->fetch("SELECT * FROM server_state WHERE id = 1");
