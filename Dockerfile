@@ -1,22 +1,12 @@
-# Dockerfile
-FROM php:7.4-fpm
+# syntax=docker/dockerfile:1
+FROM php:8.3-fpm-alpine
 
-# Install Nginx
-RUN apt-get update && \  
-    apt-get install -y nginx && \  
-    apt-get clean && \  
-    rm -rf /var/lib/apt/lists/*
+RUN docker-php-ext-install pdo pdo_mysql
 
-# Copy nginx configuration
-COPY docker/nginx.conf /etc/nginx/sites-available/default
+WORKDIR /app
+COPY . /app
 
-# Set working directory
-WORKDIR /var/www/html
+RUN chown -R www-data:www-data /app
 
-# Copy application code
-COPY . /var/www/html/
-
-# Expose port 80
-EXPOSE 80
-
-CMD service nginx start && php-fpm
+EXPOSE 9000
+CMD ["php-fpm"]
