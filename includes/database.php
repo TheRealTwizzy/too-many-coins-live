@@ -22,6 +22,9 @@ class Database {
                 ]
             );
         } catch (PDOException $e) {
+            if (PHP_SAPI === 'cli') {
+                throw new RuntimeException('Database connection failed: ' . $e->getMessage(), 0, $e);
+            }
             die(json_encode(['error' => 'Database connection failed']));
         }
     }
@@ -31,6 +34,10 @@ class Database {
             self::$instance = new self();
         }
         return self::$instance;
+    }
+
+    public static function resetInstance() {
+        self::$instance = null;
     }
 
     public function getConnection() {

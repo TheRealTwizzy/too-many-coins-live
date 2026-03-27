@@ -14,6 +14,11 @@ function env_first(array $keys, $default = null) {
     return $default;
 }
 
+function ticks_from_real_seconds($seconds) {
+    $tickRealSeconds = max(1, (int)(getenv('TMC_TICK_REAL_SECONDS') ?: 60));
+    return max(1, (int)ceil($seconds / $tickRealSeconds));
+}
+
 // Database variables (prefer DB_*; support common platform aliases)
 define('DB_HOST', env_first(['DB_HOST', 'MYSQLHOST', 'MYSQL_HOST', 'HOSTINGER_DB_HOST'], ''));
 define('DB_PORT', env_first(['DB_PORT', 'MYSQLPORT', 'MYSQL_PORT', 'HOSTINGER_DB_PORT'], ''));
@@ -23,31 +28,37 @@ define('DB_PASS', env_first(['DB_PASS', 'MYSQLPASSWORD', 'MYSQL_PASSWORD', 'HOST
 
 // Season timing constants
 define('SEASON_ANCHOR', 345600);        // 1970-01-05T00:00:00Z in seconds
-define('SEASON_DURATION', 2419200);     // 28 days in seconds
-define('SEASON_CADENCE', 604800);       // 7 days in seconds
-define('BLACKOUT_DURATION', 259200);    // 72 hours in seconds
+define('SEASON_DURATION', ticks_from_real_seconds(2419200));   // 28 days
+define('SEASON_CADENCE', ticks_from_real_seconds(604800));     // 7 days
+define('BLACKOUT_DURATION', ticks_from_real_seconds(259200));  // 72 hours
 
-// Time scale: 1 = real-time (28-day seasons), 60 = accelerated (11-hour seasons)
-define('TIME_SCALE', (int)(getenv('TMC_TIME_SCALE') ?: 60));
+// Time scale multiplier applied after tick quantization. Keep at 1 in production.
+define('TIME_SCALE', max(1, (int)(getenv('TMC_TIME_SCALE') ?: 1)));
+
+// Real seconds represented by one base tick (Dokploy scheduler minimum is 60s).
+define('TICK_REAL_SECONDS', max(1, (int)(getenv('TMC_TICK_REAL_SECONDS') ?: 60)));
 
 // Tick processing controls
 define('TMC_TICK_ON_REQUEST', filter_var(getenv('TMC_TICK_ON_REQUEST') ?: '1', FILTER_VALIDATE_BOOLEAN));
 define('TMC_TICK_SECRET', env_first(['TMC_TICK_SECRET', 'TICK_SECRET'], ''));
 
 // Activity
-define('IDLE_TIMEOUT_TICKS', 54000);    // 15 real minutes at 60x scale
+define('IDLE_TIMEOUT_TICKS', ticks_from_real_seconds(900));  // 15 real minutes
 
 // Trade
-define('TRADE_TIMEOUT_TICKS', 3600);    // 1 hour of game ticks
+define('TRADE_TIMEOUT_TICKS', ticks_from_real_seconds(3600));  // 1 real hour
+
+// Economy tuning windows
+define('HOARDING_WINDOW_TICKS', ticks_from_real_seconds(86400));  // 24 real hours
 
 // Lock-In
 define('MIN_PARTICIPATION_TICKS', 1);
 
 // Sigil drops
-define('SIGIL_DROP_RATE', 50000);       // 1 in 50,000
-define('SIGIL_PITY_TICKS', 120000);
+define('SIGIL_DROP_RATE', max(1, (int)round(50000 / 60)));  // 1 in 833 (1 tick/min default)
+define('SIGIL_PITY_TICKS', ticks_from_real_seconds(120000));
 define('SIGIL_MAX_DROPS_WINDOW', 3);
-define('SIGIL_DROP_WINDOW_TICKS', 86400);
+define('SIGIL_DROP_WINDOW_TICKS', ticks_from_real_seconds(86400));
 
 // Sigil tier odds (fixed-point, sum = 1,000,000)
 define('SIGIL_TIER_ODDS', [
@@ -59,7 +70,7 @@ define('SIGIL_TIER_ODDS', [
 ]);
 
 // Participation bonus
-define('PARTICIPATION_BONUS_DIVISOR', 3600);
+define('PARTICIPATION_BONUS_DIVISOR', ticks_from_real_seconds(3600));
 define('PARTICIPATION_BONUS_CAP', 56);
 
 // Placement bonus

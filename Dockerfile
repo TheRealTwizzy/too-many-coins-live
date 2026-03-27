@@ -8,6 +8,7 @@ WORKDIR /app
 COPY . /app
 
 RUN cp /app/docker/apache-vhost.conf /etc/apache2/sites-available/000-default.conf \
+	&& chmod +x /app/docker/worker-entrypoint.sh \
 	&& chown -R www-data:www-data /app
 
 EXPOSE 80

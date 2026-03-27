@@ -1,0 +1,67 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tmc-web
+    ports:
+      - "8080:80"
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: too_many_coins
+      DB_USER: tmc
+      DB_PASS: tmc_dev_password
+      TMC_TICK_ON_REQUEST: "false"
+      TMC_TICK_REAL_SECONDS: "5"
+      TMC_TIME_SCALE: "1"
+      TMC_INIT_SECRET: change-me-init-secret
+      TMC_TICK_SECRET: change-me-tick-secret
+      TZ: UTC
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tmc-worker
+    command: ["/app/docker/worker-entrypoint.sh"]
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: too_many_coins
+      DB_USER: tmc
+      DB_PASS: tmc_dev_password
+      TMC_TICK_ON_REQUEST: "false"
+      TMC_TICK_REAL_SECONDS: "5"
+      TMC_WORKER_INTERVAL_SECONDS: "5"
+      TMC_WORKER_START_DELAY_SECONDS: "2"
+      TMC_TIME_SCALE: "1"
+      TZ: UTC
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8.0
+    container_name: tmc-mysql
+    environment:
+      MYSQL_DATABASE: too_many_coins
+      MYSQL_USER: tmc
+      MYSQL_PASSWORD: tmc_dev_password
+      MYSQL_ROOT_PASSWORD: root_dev_password
+      TZ: UTC
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -proot_dev_password --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+volumes:
+  mysql_data:

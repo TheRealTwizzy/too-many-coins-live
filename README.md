@@ -34,10 +34,10 @@ Too Many Coins is a season-based multiplayer economic strategy game. Players joi
 
 ## Sigil Drop System
 
-- **Base Rate**: 1 in 50,000 per eligible tick (Bernoulli trial)
+- **Base Rate**: 1 in 833 per eligible tick (1-minute ticks)
 - **Eligibility**: Must be Online + Participating + Active (not Idle)
-- **Pity Timer**: Guaranteed Tier I drop after 120,000 eligible ticks with no drop
-- **Throttle**: Maximum 3 drops per rolling 86,400-tick window
+- **Pity Timer**: Guaranteed Tier I drop after 2,000 eligible ticks with no drop
+- **Throttle**: Maximum 3 drops per rolling 1,440-tick window
 - **Tier Odds**: T1 70%, T2 20%, T3 8%, T4 1.5%, T5 0.5%
 
 ## Tech Stack
@@ -142,7 +142,36 @@ All endpoints are accessed via `POST /api/index.php?action=<action>` with JSON b
 
 ## Tick Processing in Production
 
-The server supports a dedicated scheduler endpoint:
+The server supports two production-safe tick models:
+
+1. Dedicated internal worker (recommended for Dokploy)
+2. Scheduler endpoint (fallback)
+
+### Dedicated Internal Worker (Recommended)
+
+Run a separate worker process/service from the same image:
+
+```bash
+/app/docker/worker-entrypoint.sh
+```
+
+This executes `php /app/worker/tick_worker.php`, which calls `TickEngine::processTicks()` directly on an interval and does not require public HTTP calls.
+
+Recommended env for worker-based processing:
+
+- `TMC_TICK_ON_REQUEST=false`
+- `TMC_TICK_REAL_SECONDS=5` (or your target cadence)
+- `TMC_WORKER_INTERVAL_SECONDS=5`
+- `TMC_WORKER_START_DELAY_SECONDS=2` (optional)
+- `TMC_WORKER_ERROR_BACKOFF_SECONDS=2` (optional)
+
+Worker safety:
+
+- Uses MySQL advisory lock `GET_LOCK('tmc_tick_worker', 0)` to avoid concurrent tick execution if more than one worker replica is accidentally started.
+
+### Scheduler Endpoint (Fallback)
+
+If you cannot run a worker service, use the dedicated scheduler endpoint:
 
 - `POST /api/index.php?action=tick`
 - Header: `X-Tick-Secret: <TMC_TICK_SECRET>`
@@ -151,8 +180,10 @@ Recommended environment variables:
 
 - `TMC_TICK_SECRET=<strong-random-secret>`
 - `TMC_TICK_ON_REQUEST=false`
+- `TMC_TICK_REAL_SECONDS=60`
+- `TMC_TIME_SCALE=1`
 
-Then schedule a request every 5 to 15 seconds (Dokploy schedule or external cron):
+Then schedule a request every 1 minute (Dokploy schedule or external cron):
 
 ```bash
 curl -sS -X POST "https://your-domain/api/index.php?action=tick" \
