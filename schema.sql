@@ -123,6 +123,9 @@ CREATE TABLE IF NOT EXISTS season_participation (
     sigils_t3 INT NOT NULL DEFAULT 0,
     sigils_t4 INT NOT NULL DEFAULT 0,
     sigils_t5 INT NOT NULL DEFAULT 0,
+    -- Sigil drop tracking mirrors runtime state
+    sigil_drops_total INT NOT NULL DEFAULT 0,
+    eligible_ticks_since_last_drop BIGINT NOT NULL DEFAULT 0,
     -- Participation tracking
     participation_time_total BIGINT NOT NULL DEFAULT 0,
     participation_ticks_since_join BIGINT NOT NULL DEFAULT 0,

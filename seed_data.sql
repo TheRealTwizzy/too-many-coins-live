@@ -1,5 +1,4 @@
 -- Too Many Coins - Seed Data
-USE too_many_coins;
 
 -- Cosmetic catalog items (using canonical price tiers: 10, 25, 60, 150, 400)
 INSERT INTO cosmetic_catalog (name, description, category, price_global_stars, css_class) VALUES

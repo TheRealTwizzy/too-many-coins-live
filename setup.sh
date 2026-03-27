@@ -54,7 +54,7 @@ mysql -e "USE ${DB_NAME}; SOURCE ${SCRIPT_DIR}/schema.sql;"
 mysql -e "USE ${DB_NAME}; SOURCE ${SCRIPT_DIR}/seed_data.sql;"
 mysql -e "USE ${DB_NAME}; SOURCE ${SCRIPT_DIR}/migration_boosts_drops.sql;"
 
-# Add columns that the migration ALTER TABLE might fail on
+# Ensure runtime-required sigil drop columns exist on older databases
 mysql ${DB_NAME} -e "ALTER TABLE season_participation ADD COLUMN sigil_drops_total INT NOT NULL DEFAULT 0, ADD COLUMN eligible_ticks_since_last_drop BIGINT NOT NULL DEFAULT 0;" 2>/dev/null || true
 
 echo -e "${GREEN}  Database loaded successfully.${NC}"

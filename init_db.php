@@ -56,33 +56,33 @@ try {
     $pdo->exec($migration);
     $results[] = 'Boost/drop migration loaded';
 
-    // Add columns to season_participation if they don't exist
+    // Add canonical sigil drop columns to season_participation if they don't exist
     try {
-        $pdo->exec("ALTER TABLE season_participation ADD COLUMN pity_counter INT NOT NULL DEFAULT 0");
-        $results[] = 'Added pity_counter column';
+        $pdo->exec("ALTER TABLE season_participation ADD COLUMN sigil_drops_total INT NOT NULL DEFAULT 0");
+        $results[] = 'Added sigil_drops_total column';
     } catch (PDOException $e) {
         if (strpos($e->getMessage(), 'Duplicate column') === false) {
-            $results[] = 'pity_counter: ' . $e->getMessage();
+            $results[] = 'sigil_drops_total: ' . $e->getMessage();
         } else {
-            $results[] = 'pity_counter column already exists';
+            $results[] = 'sigil_drops_total column already exists';
         }
     }
 
     try {
-        $pdo->exec("ALTER TABLE season_participation ADD COLUMN eligible_ticks_no_drop INT NOT NULL DEFAULT 0");
-        $results[] = 'Added eligible_ticks_no_drop column';
+        $pdo->exec("ALTER TABLE season_participation ADD COLUMN eligible_ticks_since_last_drop BIGINT NOT NULL DEFAULT 0");
+        $results[] = 'Added eligible_ticks_since_last_drop column';
     } catch (PDOException $e) {
         if (strpos($e->getMessage(), 'Duplicate column') === false) {
-            $results[] = 'eligible_ticks_no_drop: ' . $e->getMessage();
+            $results[] = 'eligible_ticks_since_last_drop: ' . $e->getMessage();
         } else {
-            $results[] = 'eligible_ticks_no_drop column already exists';
+            $results[] = 'eligible_ticks_since_last_drop column already exists';
         }
     }
 
     // Verify
     $tables = $pdo->query("SHOW TABLES")->fetchAll(PDO::FETCH_COLUMN);
     $boostCount = $pdo->query("SELECT COUNT(*) FROM boost_catalog")->fetchColumn();
-    $cosmeticCount = $pdo->query("SELECT COUNT(*) FROM cosmetics")->fetchColumn();
+    $cosmeticCount = $pdo->query("SELECT COUNT(*) FROM cosmetic_catalog")->fetchColumn();
 
     echo json_encode([
         'status' => 'success',

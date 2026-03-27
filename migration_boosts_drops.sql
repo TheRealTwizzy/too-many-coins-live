@@ -1,8 +1,6 @@
 -- Migration: Add Boost system and Sigil drop tracking
 -- Too Many Coins
 
-USE too_many_coins;
-
 -- ============================================================
 -- BOOST CATALOG (per-season configurable boost types)
 -- ============================================================
