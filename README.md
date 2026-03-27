@@ -83,13 +83,22 @@ too-many-coins/
 └── README.md                   # This file
 ```
 
-## One-Time Live DB Hotfix
+## Automatic DB Hotfixes
 
-If your database was initialized before the boost duration adjustment, apply:
+Runtime hotfix application is enabled by default:
+
+- Any file matching `migration_*_hotfix.sql` in the repo root is auto-applied once.
+- Applied files are tracked in `schema_migrations` with filename + checksum.
+- To add a new DB hotfix, create a new migration file (do not edit an already-applied one).
+
+Current hotfix files include:
 
 - `migration_boost_duration_hotfix.sql`
+- `migration_boost_title_case_hotfix.sql`
 
-This permanently normalizes legacy self-boost durations/descriptions to minute-scale values while preserving hour-scale seasonal global boosts.
+Disable auto-hotfixing only if needed:
+
+- `TMC_AUTO_SQL_HOTFIX=false`
 
 ## Wiki (In-Repo, Same Domain)
 

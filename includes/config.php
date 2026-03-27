@@ -41,6 +41,7 @@ define('TICK_REAL_SECONDS', max(1, (int)(getenv('TMC_TICK_REAL_SECONDS') ?: 60))
 // Tick processing controls
 define('TMC_TICK_ON_REQUEST', filter_var(getenv('TMC_TICK_ON_REQUEST') ?: '1', FILTER_VALIDATE_BOOLEAN));
 define('TMC_TICK_SECRET', env_first(['TMC_TICK_SECRET', 'TICK_SECRET'], ''));
+define('TMC_AUTO_SQL_HOTFIX', filter_var(getenv('TMC_AUTO_SQL_HOTFIX') ?: '1', FILTER_VALIDATE_BOOLEAN));
 
 // Activity
 define('IDLE_TIMEOUT_TICKS', ticks_from_real_seconds(900));  // 15 real minutes
