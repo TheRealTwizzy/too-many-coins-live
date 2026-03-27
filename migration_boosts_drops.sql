@@ -91,5 +91,5 @@ INSERT INTO boost_catalog (name, description, tier_required, sigil_cost, scope, 
 
 -- Add columns to season_participation for drop tracking integration
 ALTER TABLE season_participation 
-    ADD COLUMN IF NOT EXISTS eligible_ticks_since_last_drop BIGINT NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS sigil_drops_total INT NOT NULL DEFAULT 0;
+    ADD COLUMN eligible_ticks_since_last_drop BIGINT NOT NULL DEFAULT 0,
+    ADD COLUMN sigil_drops_total INT NOT NULL DEFAULT 0;
