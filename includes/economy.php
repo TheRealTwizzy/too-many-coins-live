@@ -218,18 +218,25 @@ class Economy {
      * Returns tier number (1-5) or 0 for no drop
      */
     public static function processSigilDrop($season, $playerId, $seasonTick) {
-        // Deterministic RNG using SHA-256
+        // Deterministic RNG using SHA-256.
+        // Use 'J' (unsigned 64-bit big-endian) instead of 'P' (machine byte-order) so
+        // the hash input is identical on every platform/PHP build.
         $seed = $season['season_seed'];
-        $input = pack('P', $season['season_id']) . pack('P', $seasonTick) . $seed . pack('P', $playerId);
+        $input = pack('J', $season['season_id']) . pack('J', $seasonTick) . $seed . pack('J', $playerId);
         $hash = hash('sha256', $input, true);
         
-        // Bernoulli trial: first 8 bytes as uint64 mod SIGIL_DROP_RATE
-        $trial = unpack('P', substr($hash, 0, 8))[1] % SIGIL_DROP_RATE;
+        // Use 'N' (unsigned 32-bit big-endian) for both extractions: portable across all
+        // PHP platforms unlike 'P' (machine byte-order 64-bit). A 32-bit range
+        // (0–4,294,967,295) is far larger than SIGIL_DROP_RATE (833) and 1,000,000,
+        // so the modulo distribution is effectively uniform.
+
+        // Bernoulli trial: bytes 0-3 mod SIGIL_DROP_RATE
+        $trial = unpack('N', substr($hash, 0, 4))[1] % SIGIL_DROP_RATE;
         
         if ($trial !== 0) return 0; // No drop
         
-        // Tier selection: next 8 bytes mod 1,000,000
-        $tierRoll = unpack('P', substr($hash, 8, 8))[1] % 1000000;
+        // Tier selection: bytes 4-7 mod 1,000,000 (matches SIGIL_TIER_ODDS fixed-point scale)
+        $tierRoll = unpack('N', substr($hash, 4, 4))[1] % 1000000;
         
         $cumulative = 0;
         foreach (SIGIL_TIER_ODDS as $tier => $odds) {
