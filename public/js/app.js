@@ -79,7 +79,13 @@ const TMC = {
         this.state.gameState = gs;
         this.state.seasons = gs.seasons || [];
         this.syncSeasonCountdowns(this.state.seasons);
-        this.state.player = gs.player;
+        this.state.player = gs.player || null;
+        this.renderUserArea();
+
+        if (this.state.currentScreen === 'auth' && this.state.player) {
+            this.navigate('home');
+        }
+
         this.updateHUD();
         this.checkIdleModal();
 
@@ -96,6 +102,7 @@ const TMC = {
         e.preventDefault();
         const email = document.getElementById('login-email').value;
         const password = document.getElementById('login-password').value;
+        document.getElementById('login-error').textContent = '';
         const result = await this.api('login', { email, password });
         if (result.error) {
             document.getElementById('login-error').textContent = result.error;
@@ -105,6 +112,16 @@ const TMC = {
         document.cookie = `tmc_session=${result.token}; path=/; max-age=86400`;
         this.toast('Welcome back, ' + result.handle + '!', 'success');
         await this.refreshGameState();
+        if (!this.state.player || this.state.player.player_id != result.player_id) {
+            await this.refreshGameState();
+        }
+        if (!this.state.player) {
+            this.state.player = {
+                player_id: result.player_id,
+                handle: result.handle,
+                global_stars: 0
+            };
+        }
         this.renderUserArea();
         this.navigate('home');
     },
@@ -114,6 +131,7 @@ const TMC = {
         const handle = document.getElementById('reg-handle').value;
         const email = document.getElementById('reg-email').value;
         const password = document.getElementById('reg-password').value;
+        document.getElementById('register-error').textContent = '';
         const result = await this.api('register', { handle, email, password });
         if (result.error) {
             document.getElementById('register-error').textContent = result.error;
@@ -123,6 +141,16 @@ const TMC = {
         document.cookie = `tmc_session=${result.token}; path=/; max-age=86400`;
         this.toast('Account created! Welcome, ' + result.handle + '!', 'success');
         await this.refreshGameState();
+        if (!this.state.player || this.state.player.player_id != result.player_id) {
+            await this.refreshGameState();
+        }
+        if (!this.state.player) {
+            this.state.player = {
+                player_id: result.player_id,
+                handle: result.handle,
+                global_stars: 0
+            };
+        }
         this.renderUserArea();
         this.navigate('home');
     },
@@ -291,7 +319,14 @@ const TMC = {
     },
 
     tickRealtimeViews() {
-        const p = this.state.player;
+        if (this.state.currentScreen === 'seasons') {
+            const timerValues = document.querySelectorAll('.season-timer-value');
+            timerValues.forEach((el) => {
+                const seasonId = el.getAttribute('data-season-id');
+                const season = this.state.seasons.find(s => s.season_id == seasonId);
+                if (season) el.textContent = this.getSeasonTimerText(season);
+            });
+        }
 
         if (this.state.currentScreen === 'season-detail' && this.state.currentSeason) {
             const season = this.state.seasons.find(s => s.season_id == this.state.currentSeason);
@@ -337,6 +372,28 @@ const TMC = {
         if (hours > 0) return `${hours}h ${minutes}m ${secs}s`;
         if (minutes > 0) return `${minutes}m ${secs}s`;
         return `${secs}s`;
+    },
+
+    getSeasonCountdownMode(season) {
+        if (season && season.countdown_mode) return season.countdown_mode;
+        const status = season && (season.computed_status || season.status);
+        if (status === 'Scheduled') return 'scheduled';
+        if (status === 'Active' || status === 'Blackout') return 'running';
+        return 'ended';
+    },
+
+    getSeasonCardTimerLabel(season) {
+        const mode = this.getSeasonCountdownMode(season);
+        if (mode === 'scheduled') return 'Begins in';
+        if (mode === 'running') return 'Time Left';
+        return 'Ended';
+    },
+
+    getSeasonDetailTimerLabel(season) {
+        const mode = this.getSeasonCountdownMode(season);
+        if (mode === 'scheduled') return 'Begins in';
+        if (mode === 'running') return 'Time Remaining';
+        return 'Ended';
     },
 
     getSeasonTimerText(season) {
@@ -391,6 +448,8 @@ const TMC = {
         for (const s of this.state.seasons) {
             const status = s.computed_status || s.status;
             const statusClass = status.toLowerCase();
+            const timerLabel = this.getSeasonCardTimerLabel(s);
+            const timerText = this.getSeasonTimerText(s);
             const canJoin = this.state.player && !this.state.player.joined_season_id &&
                            (status === 'Active' || status === 'Blackout');
             const isMyseason = this.state.player && this.state.player.joined_season_id == s.season_id;
@@ -412,8 +471,8 @@ const TMC = {
                             <span class="stat-value">${this.formatNumber(s.current_star_price)} coins</span>
                         </div>
                         <div class="season-stat">
-                            <span class="stat-label">Time Left</span>
-                            <span class="stat-value">${s.time_remaining_formatted}</span>
+                            <span class="stat-label season-timer-label" data-season-id="${s.season_id}">${timerLabel}</span>
+                            <span class="stat-value season-timer-value" data-season-id="${s.season_id}">${timerText}</span>
                         </div>
                         <div class="season-stat">
                             <span class="stat-label">Coin Supply</span>
@@ -434,11 +493,21 @@ const TMC = {
     // ==================== SEASON DETAIL ====================
     updateSeasonDetailLive() {
         // Update dynamic values without re-rendering the entire season detail
-        const p = this.state.player;
-        if (!p || !p.participation) return;
         const seasonId = this.state.currentSeason;
         const season = this.state.seasons.find(s => s.season_id == seasonId);
         if (!season) return;
+
+        // Update timer and label for all viewers (including non-participants)
+        const timerLabel = document.querySelector('.timer-label');
+        const timerValue = document.querySelector('.timer-value');
+        if (timerLabel) timerLabel.textContent = this.getSeasonDetailTimerLabel(season);
+        if (timerValue) timerValue.textContent = this.getSeasonTimerText(season);
+
+        const p = this.state.player;
+        if (!p || !p.participation) {
+            this.loadSeasonLeaderboard(seasonId);
+            return;
+        }
 
         // Update economy bar values if they exist
         const econValues = document.querySelectorAll('.econ-value');
@@ -447,10 +516,6 @@ const TMC = {
             econValues[1].textContent = this.formatNumber(season.total_coins_supply);
             econValues[2].textContent = season.player_count || 0;
         }
-
-        // Update timer
-        const timerValue = document.querySelector('.timer-value');
-        if (timerValue) timerValue.textContent = this.getSeasonTimerText(season);
 
         // Update coin display in purchase panel
         const panelInfos = document.querySelectorAll('.panel-info');
@@ -503,6 +568,7 @@ const TMC = {
         const status = detail.computed_status || detail.status;
         const isBlackout = status === 'Blackout';
         const isExpired = status === 'Expired';
+        const timerLabel = this.getSeasonDetailTimerLabel(detail);
 
         let html = `
             <div class="season-header">
@@ -513,7 +579,7 @@ const TMC = {
                 </div>
                 <div class="season-header-right">
                     <div class="season-timer">
-                        <span class="timer-label">${isExpired ? 'Ended' : 'Time Remaining'}</span>
+                        <span class="timer-label">${timerLabel}</span>
                         <span class="timer-value">${this.getSeasonTimerText(detail)}</span>
                     </div>
                 </div>
@@ -1059,14 +1125,94 @@ const TMC = {
     },
 
     // ==================== GLOBAL LEADERBOARD ====================
+    getActiveJoinedSeason() {
+        if (!this.state.player || !this.state.player.joined_season_id) return null;
+        const joinedSeasonId = this.state.player.joined_season_id;
+        const season = this.state.seasons.find(s => s.season_id == joinedSeasonId);
+        if (!season) return null;
+
+        const status = season.computed_status || season.status;
+        if (status === 'Active' || status === 'Blackout') return season;
+        return null;
+    },
+
+    setLeaderboardMeta(title, subtitle) {
+        const titleEl = document.getElementById('global-lb-title');
+        const subtitleEl = document.getElementById('global-lb-subtitle');
+        if (titleEl) titleEl.textContent = title;
+        if (subtitleEl) subtitleEl.textContent = subtitle;
+    },
+
+    setLeaderboardHeader(columns) {
+        const theadRow = document.querySelector('#global-lb-content thead tr');
+        if (!theadRow) return;
+        theadRow.innerHTML = columns.map((c) => `<th>${c}</th>`).join('');
+    },
+
+    renderSeasonLeaderboardRows(entries) {
+        return entries.map((entry, i) => {
+            const rank = entry.final_rank || (i + 1);
+            const isLockedIn = entry.lock_in_effect_tick !== null;
+            const isMe = this.state.player && entry.player_id == this.state.player.player_id;
+            let statusBadge = '';
+            if (entry.badge_awarded) {
+                const badgeEmoji = { first: '&#129351;', second: '&#129352;', third: '&#129353;' };
+                statusBadge = `<span class="badge badge-${entry.badge_awarded}">${badgeEmoji[entry.badge_awarded] || ''}</span>`;
+            } else if (isLockedIn) {
+                statusBadge = '<span class="badge badge-lockin">Locked In</span>';
+            } else if (entry.end_membership) {
+                statusBadge = '<span class="badge badge-ended">End-Finisher</span>';
+            }
+
+            return `
+                <tr class="${isMe ? 'my-row' : ''} ${rank <= 3 ? 'top-three' : ''}">
+                    <td class="rank-cell">${rank <= 3 ? ['&#129351;', '&#129352;', '&#129353;'][rank-1] : rank}</td>
+                    <td class="player-cell">
+                        <span class="player-link" onclick="TMC.navigate('profile', ${entry.player_id})">${this.escapeHtml(entry.handle)}</span>
+                    </td>
+                    <td class="stars-cell">${this.formatNumber(entry.seasonal_stars)}</td>
+                    <td class="status-cell">${statusBadge}</td>
+                </tr>
+            `;
+        }).join('');
+    },
+
     async loadGlobalLeaderboard() {
-        const lb = await this.api('global_leaderboard');
+        const activeSeason = this.getActiveJoinedSeason();
         const body = document.getElementById('global-lb-body');
         const empty = document.getElementById('global-lb-empty');
+
+        if (activeSeason) {
+            this.setLeaderboardMeta(
+                `Season #${activeSeason.season_id} Leaderboard`,
+                'Ranked by Seasonal Stars in your active season.'
+            );
+            this.setLeaderboardHeader(['Rank', 'Player', 'Seasonal Stars', 'Status']);
+
+            const lb = await this.api('leaderboard', { season_id: activeSeason.season_id });
+            if (!lb || lb.length === 0 || lb.error) {
+                body.innerHTML = '';
+                empty.style.display = '';
+                empty.innerHTML = '<p>No ranked players yet in this season.</p>';
+                return;
+            }
+
+            empty.style.display = 'none';
+            body.innerHTML = this.renderSeasonLeaderboardRows(lb);
+            return;
+        }
+
+        this.setLeaderboardMeta(
+            'Global Leaderboard',
+            'Ranked by Global Stars earned this yearly cycle.'
+        );
+        this.setLeaderboardHeader(['Rank', 'Player', 'Global Stars']);
+        const lb = await this.api('global_leaderboard');
 
         if (!lb || lb.length === 0 || lb.error) {
             body.innerHTML = '';
             empty.style.display = '';
+            empty.innerHTML = '<p>No players on the leaderboard yet. Earn Global Stars through season outcomes and Lock-In!</p>';
             return;
         }
         empty.style.display = 'none';

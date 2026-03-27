@@ -356,11 +356,9 @@ function getGameState($player) {
     $seasons = GameTime::getVisibleSeasons();
     foreach ($seasons as &$s) {
         $s['computed_status'] = GameTime::getSeasonStatus($s);
+        applySeasonCountdownFields($s, $gameTime);
         $endTime = (int)$s['end_time'];
         $blackoutTime = (int)$s['blackout_time'];
-        $s['time_remaining'] = max(0, $endTime - $gameTime);
-        $s['time_remaining_real_seconds'] = gameTicksToRealSeconds($s['time_remaining']);
-        $s['time_remaining_formatted'] = GameTime::formatTimeRemaining($endTime - $gameTime);
         $s['blackout_remaining'] = max(0, $blackoutTime - $gameTime);
         $s['is_blackout'] = ($gameTime >= $blackoutTime && $gameTime < $endTime);
         
@@ -427,6 +425,32 @@ function gameTicksToRealSeconds($gameTicks) {
     return max(0, intdiv(((int)$gameTicks) * (int)TICK_REAL_SECONDS, $scale));
 }
 
+function applySeasonCountdownFields(&$season, $gameTime) {
+    $status = $season['computed_status'] ?? GameTime::getSeasonStatus($season);
+    $startTime = (int)$season['start_time'];
+    $endTime = (int)$season['end_time'];
+
+    if ($status === 'Scheduled') {
+        $remaining = max(0, $startTime - $gameTime);
+        $mode = 'scheduled';
+        $label = 'Begins in';
+    } elseif ($status === 'Active' || $status === 'Blackout') {
+        $remaining = max(0, $endTime - $gameTime);
+        $mode = 'running';
+        $label = 'Time Left';
+    } else {
+        $remaining = 0;
+        $mode = 'ended';
+        $label = 'Ended';
+    }
+
+    $season['time_remaining'] = $remaining;
+    $season['time_remaining_real_seconds'] = gameTicksToRealSeconds($remaining);
+    $season['time_remaining_formatted'] = GameTime::formatTimeRemaining($remaining);
+    $season['countdown_mode'] = $mode;
+    $season['countdown_label'] = $label;
+}
+
 function canLockIn($player, $participation) {
     if (!$player['participation_enabled'] || !$player['joined_season_id']) return false;
     if ($player['idle_modal_active']) return false;
@@ -462,9 +486,7 @@ function getSeasonDetail($player, $seasonId) {
     
     $gameTime = GameTime::now();
     $season['computed_status'] = GameTime::getSeasonStatus($season);
-    $season['time_remaining'] = max(0, (int)$season['end_time'] - $gameTime);
-    $season['time_remaining_real_seconds'] = gameTicksToRealSeconds($season['time_remaining']);
-    $season['time_remaining_formatted'] = GameTime::formatTimeRemaining((int)$season['end_time'] - $gameTime);
+    applySeasonCountdownFields($season, $gameTime);
     
     // Vault
     $season['vault'] = $db->fetchAll(
