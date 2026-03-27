@@ -1411,6 +1411,17 @@ a:hover { text-decoration: underline; }
     margin: 0.75rem 0;
 }
 
+.boost-catalog-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.boost-catalog-grid.boost-catalog-collapsed {
+    display: none;
+}
+
 .boost-catalog-grid h4 {
     color: var(--text-secondary);
     font-size: 0.82rem;

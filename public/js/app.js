@@ -12,6 +12,8 @@ const TMC = {
         currentChat: 'GLOBAL',
         gameState: null,
         pollInterval: null,
+        realtimeInterval: null,
+        seasonCountdowns: {},
         chatPollInterval: null,
         shopFilter: 'all',
         cosmetics: [],
@@ -58,6 +60,7 @@ const TMC = {
 
         // Start polling
         this.startPolling();
+        this.startRealtimeClock();
     },
 
     startPolling() {
@@ -65,11 +68,17 @@ const TMC = {
         this.state.pollInterval = setInterval(() => this.refreshGameState(), 3000);
     },
 
+    startRealtimeClock() {
+        if (this.state.realtimeInterval) clearInterval(this.state.realtimeInterval);
+        this.state.realtimeInterval = setInterval(() => this.tickRealtimeViews(), 1000);
+    },
+
     async refreshGameState() {
         const gs = await this.api('game_state');
         if (gs.error) return;
         this.state.gameState = gs;
         this.state.seasons = gs.seasons || [];
+        this.syncSeasonCountdowns(this.state.seasons);
         this.state.player = gs.player;
         this.updateHUD();
         this.checkIdleModal();
@@ -285,8 +294,71 @@ const TMC = {
         // Find current season timer
         const season = this.state.seasons.find(s => s.season_id == p.joined_season_id);
         if (season) {
-            document.getElementById('hud-season-timer').textContent = season.time_remaining_formatted;
+            document.getElementById('hud-season-timer').textContent = this.getSeasonTimerText(season);
         }
+    },
+
+    tickRealtimeViews() {
+        const p = this.state.player;
+
+        if (p && p.joined_season_id) {
+            const hudTimer = document.getElementById('hud-season-timer');
+            const hudSeason = this.state.seasons.find(s => s.season_id == p.joined_season_id);
+            if (hudTimer && hudSeason) {
+                hudTimer.textContent = this.getSeasonTimerText(hudSeason);
+            }
+        }
+
+        if (this.state.currentScreen === 'season-detail' && this.state.currentSeason) {
+            const season = this.state.seasons.find(s => s.season_id == this.state.currentSeason);
+            const timerValue = document.querySelector('.timer-value');
+            if (season && timerValue) {
+                timerValue.textContent = this.getSeasonTimerText(season);
+            }
+        }
+    },
+
+    syncSeasonCountdowns(seasons) {
+        if (!Array.isArray(seasons)) return;
+        const syncedAtMs = Date.now();
+        seasons.forEach((season) => {
+            if (!season || season.season_id === undefined || season.season_id === null) return;
+            if (season.time_remaining_real_seconds === undefined || season.time_remaining_real_seconds === null) return;
+            const remainingSeconds = Math.max(0, parseInt(season.time_remaining_real_seconds, 10) || 0);
+            this.state.seasonCountdowns[season.season_id] = {
+                remainingSeconds,
+                syncedAtMs
+            };
+        });
+    },
+
+    getLiveSeasonSeconds(season) {
+        if (!season || season.season_id === undefined || season.season_id === null) return null;
+        const countdown = this.state.seasonCountdowns[season.season_id];
+        if (!countdown) return null;
+        const elapsedSeconds = Math.floor((Date.now() - countdown.syncedAtMs) / 1000);
+        return Math.max(0, countdown.remainingSeconds - elapsedSeconds);
+    },
+
+    formatSecondsRemaining(seconds) {
+        const total = Math.max(0, parseInt(seconds, 10) || 0);
+        if (total <= 0) return 'Ended';
+
+        const days = Math.floor(total / 86400);
+        const hours = Math.floor((total % 86400) / 3600);
+        const minutes = Math.floor((total % 3600) / 60);
+        const secs = total % 60;
+
+        if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+        if (hours > 0) return `${hours}h ${minutes}m ${secs}s`;
+        if (minutes > 0) return `${minutes}m ${secs}s`;
+        return `${secs}s`;
+    },
+
+    getSeasonTimerText(season) {
+        const liveSeconds = this.getLiveSeasonSeconds(season);
+        if (liveSeconds !== null) return this.formatSecondsRemaining(liveSeconds);
+        return season.time_remaining_formatted || 'Ended';
     },
 
     // Track last known drop count to detect new drops
@@ -394,7 +466,7 @@ const TMC = {
 
         // Update timer
         const timerValue = document.querySelector('.timer-value');
-        if (timerValue) timerValue.textContent = season.time_remaining_formatted || 'Ended';
+        if (timerValue) timerValue.textContent = this.getSeasonTimerText(season);
 
         // Update coin display in purchase panel
         const panelInfos = document.querySelectorAll('.panel-info');
@@ -458,7 +530,7 @@ const TMC = {
                 <div class="season-header-right">
                     <div class="season-timer">
                         <span class="timer-label">${isExpired ? 'Ended' : 'Time Remaining'}</span>
-                        <span class="timer-value">${detail.time_remaining_formatted || 'Ended'}</span>
+                        <span class="timer-value">${this.getSeasonTimerText(detail)}</span>
                     </div>
                 </div>
             </div>
@@ -539,44 +611,11 @@ const TMC = {
                         <h3>Boosts</h3>
                         <p class="panel-info">Consume Sigils to activate temporary UBI modifiers.</p>
                         <div id="active-boosts-display"></div>
-                        <div id="boost-catalog-grid" class="boost-catalog-grid"></div>
-                        <button class="btn btn-outline btn-sm" onclick="TMC.loadBoostCatalog()" ${isBlackout ? 'disabled' : ''}>Load Boost Catalog</button>
-                    </div>
-
-                    <!-- Sigil Drops Panel -->
-                    <div class="action-panel panel-drops">
-                        <h3>Sigil Drops</h3>
-                        <p class="panel-info">Sigils drop randomly while you're actively participating. Rarer tiers are much less likely.</p>
-                        <div class="drop-stats">
-                            <span class="drop-stat">Total Drops: <strong>${part.sigil_drops_total || 0}</strong></span>
-                            <span class="drop-stat">Ticks Since Last Drop: <strong>${this.formatNumber(part.eligible_ticks_since_last_drop || 0)}</strong></span>
+                        <div class="boost-catalog-actions">
+                            <button id="boost-catalog-toggle" class="btn btn-outline btn-sm" onclick="TMC.toggleBoostCatalog()">Show Boost Catalog</button>
+                            <button class="btn btn-outline btn-sm" onclick="TMC.loadBoostCatalog()" ${isBlackout ? 'disabled' : ''}>Load Boost Catalog</button>
                         </div>
-                        <div id="recent-drops-list" class="recent-drops-list">
-                            ${(p.recent_drops || []).length > 0 ? 
-                                p.recent_drops.map(d => {
-                                    const tierNames = ['', 'Common', 'Uncommon', 'Rare', 'Epic', 'Legendary'];
-                                    const tierColors = ['', '#9ca3af', '#22c55e', '#3b82f6', '#a855f7', '#f59e0b'];
-                                    return `<div class="drop-entry tier-${d.tier}">
-                                        <span class="drop-tier" style="color:${tierColors[d.tier]}">T${d.tier} ${tierNames[d.tier]}</span>
-                                        <span class="drop-source">${d.source === 'pity' ? '(Pity)' : '(Random)'}</span>
-                                        <span class="drop-tick">Tick ${this.formatNumber(d.drop_tick)}</span>
-                                    </div>`;
-                                }).join('') :
-                                '<p class="empty-text">No drops yet. Keep participating!</p>'
-                            }
-                        </div>
-                        <div class="drop-odds-table">
-                            <h4>Drop Odds</h4>
-                            <table class="mini-table">
-                                <tr><td>Base Rate</td><td>1 in 50,000 per eligible tick</td></tr>
-                                <tr><td class="tier-1-text">Tier I</td><td>70%</td></tr>
-                                <tr><td class="tier-2-text">Tier II</td><td>20%</td></tr>
-                                <tr><td class="tier-3-text">Tier III</td><td>8%</td></tr>
-                                <tr><td class="tier-4-text">Tier IV</td><td>1.5%</td></tr>
-                                <tr><td class="tier-5-text">Tier V</td><td>0.5%</td></tr>
-                                <tr><td>Pity Timer</td><td>Guaranteed T1 after 120,000 ticks</td></tr>
-                            </table>
-                        </div>
+                        <div id="boost-catalog-grid" class="boost-catalog-grid boost-catalog-collapsed"></div>
                     </div>
 
                     <!-- Lock-In Panel -->
@@ -643,6 +682,10 @@ const TMC = {
 
         // Load trades if participating
         if (isParticipating) this.loadMyTrades();
+
+        this.renderActiveBoosts();
+        this.renderBoostCatalogToggle();
+        if (this._boostCatalog) this.renderBoostCatalog();
     },
 
     async loadSeasonLeaderboard(seasonId) {
@@ -737,6 +780,7 @@ const TMC = {
 
     // ==================== BOOSTS ====================
     _boostCatalog: null,
+    _boostCatalogCollapsed: true,
 
     async loadBoostCatalog() {
         const catalog = await this.api('boost_catalog');
@@ -745,13 +789,43 @@ const TMC = {
             return;
         }
         this._boostCatalog = catalog;
+        this._boostCatalogCollapsed = false;
+        this.renderBoostCatalogToggle();
         this.renderBoostCatalog();
         this.renderActiveBoosts();
+    },
+
+    toggleBoostCatalog() {
+        if (!this._boostCatalog) {
+            this.loadBoostCatalog();
+            return;
+        }
+        this._boostCatalogCollapsed = !this._boostCatalogCollapsed;
+        this.renderBoostCatalogToggle();
+        this.renderBoostCatalog();
+    },
+
+    renderBoostCatalogToggle() {
+        const toggleBtn = document.getElementById('boost-catalog-toggle');
+        if (!toggleBtn) return;
+
+        if (!this._boostCatalog || this._boostCatalog.length === 0) {
+            toggleBtn.textContent = 'Show Boost Catalog';
+            return;
+        }
+
+        toggleBtn.textContent = this._boostCatalogCollapsed ? 'Show Boost Catalog' : 'Hide Boost Catalog';
     },
 
     renderBoostCatalog() {
         const grid = document.getElementById('boost-catalog-grid');
         if (!grid || !this._boostCatalog) return;
+
+        grid.classList.toggle('boost-catalog-collapsed', this._boostCatalogCollapsed);
+        if (this._boostCatalogCollapsed) {
+            grid.innerHTML = '';
+            return;
+        }
 
         const p = this.state.player;
         const part = p ? p.participation : null;
@@ -765,6 +839,7 @@ const TMC = {
             const durationMin = Math.round(parseInt(b.duration_ticks) / 60);
             const scopeLabel = b.scope === 'GLOBAL' ? 'All Players' : 'Self Only';
             const scopeClass = b.scope === 'GLOBAL' ? 'scope-global' : 'scope-self';
+            const description = this.getBoostDescription(b);
 
             return `
                 <div class="boost-card tier-${tier} ${hasSigil ? '' : 'boost-locked'}">
@@ -772,7 +847,7 @@ const TMC = {
                         <span class="boost-icon">${b.icon || tierIcons[tier]}</span>
                         <span class="boost-name">${this.escapeHtml(b.name)}</span>
                     </div>
-                    <p class="boost-desc">${this.escapeHtml(b.description)}</p>
+                    ${description ? `<p class="boost-desc">${this.escapeHtml(description)}</p>` : ''}
                     <div class="boost-stats">
                         <span class="boost-modifier">+${modPercent}% UBI</span>
                         <span class="boost-duration">${durationMin} min</span>
@@ -790,6 +865,23 @@ const TMC = {
                 </div>
             `;
         }).join('');
+    },
+
+    getBoostDescription(boost) {
+        if (!boost) return '';
+        const name = String(boost.name || '').trim();
+        const raw = String(boost.description || '').trim();
+        if (!raw) return '';
+
+        const normalizedName = name.toLowerCase();
+        if (raw.toLowerCase() === normalizedName) return '';
+
+        const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const prefixed = new RegExp(`^${escapedName}\\s*[:\\-]\\s*`, 'i');
+        const cleaned = raw.replace(prefixed, '').trim();
+
+        if (!cleaned || cleaned.toLowerCase() === normalizedName) return '';
+        return cleaned;
     },
 
     renderActiveBoosts() {

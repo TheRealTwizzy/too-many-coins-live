@@ -359,6 +359,7 @@ function getGameState($player) {
         $endTime = (int)$s['end_time'];
         $blackoutTime = (int)$s['blackout_time'];
         $s['time_remaining'] = max(0, $endTime - $gameTime);
+        $s['time_remaining_real_seconds'] = gameTicksToRealSeconds($s['time_remaining']);
         $s['time_remaining_formatted'] = GameTime::formatTimeRemaining($endTime - $gameTime);
         $s['blackout_remaining'] = max(0, $blackoutTime - $gameTime);
         $s['is_blackout'] = ($gameTime >= $blackoutTime && $gameTime < $endTime);
@@ -420,6 +421,12 @@ function getGameState($player) {
     return $state;
 }
 
+function gameTicksToRealSeconds($gameTicks) {
+    if ($gameTicks <= 0) return 0;
+    $scale = max(1, (int)TIME_SCALE);
+    return max(0, intdiv(((int)$gameTicks) * (int)TICK_REAL_SECONDS, $scale));
+}
+
 function canLockIn($player, $participation) {
     if (!$player['participation_enabled'] || !$player['joined_season_id']) return false;
     if ($player['idle_modal_active']) return false;
@@ -456,6 +463,7 @@ function getSeasonDetail($player, $seasonId) {
     $gameTime = GameTime::now();
     $season['computed_status'] = GameTime::getSeasonStatus($season);
     $season['time_remaining'] = max(0, (int)$season['end_time'] - $gameTime);
+    $season['time_remaining_real_seconds'] = gameTicksToRealSeconds($season['time_remaining']);
     $season['time_remaining_formatted'] = GameTime::formatTimeRemaining((int)$season['end_time'] - $gameTime);
     
     // Vault
@@ -465,15 +473,28 @@ function getSeasonDetail($player, $seasonId) {
     );
     
     // Top players
-    $season['leaderboard'] = $db->fetchAll(
-        "SELECT sp.player_id, p.handle, sp.seasonal_stars, sp.lock_in_effect_tick
-         FROM season_participation sp
-         JOIN players p ON p.player_id = sp.player_id
-         WHERE sp.season_id = ? AND (sp.seasonal_stars > 0 OR sp.end_membership = 1 OR sp.lock_in_effect_tick IS NOT NULL)
-         ORDER BY sp.seasonal_stars DESC, sp.player_id ASC
-         LIMIT 50",
-        [$seasonId]
-    );
+    if ($season['computed_status'] === 'Active' || $season['computed_status'] === 'Blackout') {
+        $season['leaderboard'] = $db->fetchAll(
+            "SELECT p.player_id, p.handle,
+                    COALESCE(sp.seasonal_stars, 0) AS seasonal_stars,
+                    sp.lock_in_effect_tick
+             FROM players p
+             LEFT JOIN season_participation sp ON sp.player_id = p.player_id AND sp.season_id = ?
+             WHERE p.joined_season_id = ? AND p.participation_enabled = 1
+             ORDER BY COALESCE(sp.seasonal_stars, 0) DESC, p.player_id ASC",
+            [$seasonId, $seasonId]
+        );
+    } else {
+        $season['leaderboard'] = $db->fetchAll(
+            "SELECT sp.player_id, p.handle, sp.seasonal_stars, sp.lock_in_effect_tick
+             FROM season_participation sp
+             JOIN players p ON p.player_id = sp.player_id
+             WHERE sp.season_id = ? AND (sp.seasonal_stars > 0 OR sp.end_membership = 1 OR sp.lock_in_effect_tick IS NOT NULL)
+             ORDER BY sp.seasonal_stars DESC, sp.player_id ASC
+             LIMIT 50",
+            [$seasonId]
+        );
+    }
     
     // Player count
     $season['player_count'] = $db->fetch(
@@ -487,6 +508,29 @@ function getSeasonDetail($player, $seasonId) {
 
 function getLeaderboard($seasonId) {
     $db = Database::getInstance();
+    $season = $db->fetch("SELECT * FROM seasons WHERE season_id = ?", [$seasonId]);
+    if (!$season) return [];
+
+    $status = GameTime::getSeasonStatus($season);
+    if ($status === 'Active' || $status === 'Blackout') {
+        return $db->fetchAll(
+            "SELECT p.player_id, p.handle,
+                    COALESCE(sp.seasonal_stars, 0) AS seasonal_stars,
+                    sp.final_rank,
+                    sp.lock_in_effect_tick,
+                    COALESCE(sp.end_membership, 0) AS end_membership,
+                    sp.badge_awarded,
+                    COALESCE(sp.global_stars_earned, 0) AS global_stars_earned,
+                    COALESCE(sp.participation_bonus, 0) AS participation_bonus,
+                    COALESCE(sp.placement_bonus, 0) AS placement_bonus
+             FROM players p
+             LEFT JOIN season_participation sp ON sp.player_id = p.player_id AND sp.season_id = ?
+             WHERE p.joined_season_id = ? AND p.participation_enabled = 1
+             ORDER BY COALESCE(sp.seasonal_stars, 0) DESC, p.player_id ASC",
+            [$seasonId, $seasonId]
+        );
+    }
+
     return $db->fetchAll(
         "SELECT sp.player_id, p.handle, sp.seasonal_stars, sp.final_rank,
                 sp.lock_in_effect_tick, sp.end_membership, sp.badge_awarded,
