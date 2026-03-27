@@ -261,7 +261,7 @@ const TMC = {
     updateHUD() {
         const hud = document.getElementById('player-hud');
         const p = this.state.player;
-        if (!p || !p.participation) {
+        if (!p || !p.player_id || !p.participation) {
             hud.style.display = 'none';
             return;
         }
@@ -271,8 +271,6 @@ const TMC = {
         const totalSigils = p.participation.sigils.reduce((a, b) => a + b, 0);
         document.getElementById('hud-sigils').textContent = totalSigils;
         document.getElementById('hud-global-stars').textContent = this.formatNumber(p.global_stars);
-        document.getElementById('hud-activity').textContent = p.activity_state;
-        document.getElementById('hud-activity').className = 'hud-value activity-' + p.activity_state.toLowerCase();
 
         // Boosts count and modifier
         const boosts = p.active_boosts || { self: [], global: [], total_modifier_percent: 0 };
@@ -290,24 +288,10 @@ const TMC = {
 
         // Check for new sigil drops and show notification
         this.checkSigilDropNotifications(p);
-
-        // Find current season timer
-        const season = this.state.seasons.find(s => s.season_id == p.joined_season_id);
-        if (season) {
-            document.getElementById('hud-season-timer').textContent = this.getSeasonTimerText(season);
-        }
     },
 
     tickRealtimeViews() {
         const p = this.state.player;
-
-        if (p && p.joined_season_id) {
-            const hudTimer = document.getElementById('hud-season-timer');
-            const hudSeason = this.state.seasons.find(s => s.season_id == p.joined_season_id);
-            if (hudTimer && hudSeason) {
-                hudTimer.textContent = this.getSeasonTimerText(hudSeason);
-            }
-        }
 
         if (this.state.currentScreen === 'season-detail' && this.state.currentSeason) {
             const season = this.state.seasons.find(s => s.season_id == this.state.currentSeason);
