@@ -28,13 +28,25 @@ class TickEngine {
         GameTime::ensureSeasons();
         $gameTime = GameTime::now();
         
-        // Get all active/blackout seasons
-        $seasons = $db->fetchAll(
-            "SELECT * FROM seasons WHERE status IN ('Active', 'Blackout') OR (status = 'Expired' AND expiration_finalized = 0)"
-        );
-        
+        // Always compute status from game time; DB status is synchronized metadata.
+        $seasons = $db->fetchAll("SELECT * FROM seasons");
+
         foreach ($seasons as $season) {
-            self::processSeasonTick($season, $gameTime);
+            $computedStatus = GameTime::getSeasonStatus($season, $gameTime);
+
+            if (
+                in_array($computedStatus, ['Active', 'Blackout'], true)
+                || ($computedStatus === 'Expired' && !(int)$season['expiration_finalized'])
+            ) {
+                self::processSeasonTick($season, $gameTime);
+            }
+
+            if (($season['status'] ?? null) !== $computedStatus) {
+                $db->query(
+                    "UPDATE seasons SET status = ? WHERE season_id = ?",
+                    [$computedStatus, $season['season_id']]
+                );
+            }
         }
         
         // Update server state

@@ -138,6 +138,26 @@ All endpoints are accessed via `POST /api/index.php?action=<action>` with JSON b
 | `global_leaderboard` | Global rankings |
 | `cosmetics_catalog` | Cosmetic items catalog |
 | `chat_history` | Chat messages (channel, season_id) |
+| `tick` | Runs one server tick pulse (requires `X-Tick-Secret`) |
+
+## Tick Processing in Production
+
+The server supports a dedicated scheduler endpoint:
+
+- `POST /api/index.php?action=tick`
+- Header: `X-Tick-Secret: <TMC_TICK_SECRET>`
+
+Recommended environment variables:
+
+- `TMC_TICK_SECRET=<strong-random-secret>`
+- `TMC_TICK_ON_REQUEST=false`
+
+Then schedule a request every 5 to 15 seconds (Dokploy schedule or external cron):
+
+```bash
+curl -sS -X POST "https://your-domain/api/index.php?action=tick" \
+	-H "X-Tick-Secret: $TMC_TICK_SECRET"
+```
 
 ### Authenticated Endpoints (require `X-Session-Token` header)
 

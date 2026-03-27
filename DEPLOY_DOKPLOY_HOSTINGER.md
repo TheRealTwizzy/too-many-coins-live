@@ -45,9 +45,13 @@ Set these env vars in the Dokploy app:
 - `DB_PASS=<database password>`
 - `TMC_TIME_SCALE=60`
 - `TMC_INIT_SECRET=<strong-random-secret>`
+- `TMC_TICK_SECRET=<strong-random-secret>`
+- `TMC_TICK_ON_REQUEST=false`
 
 Optional:
 - `TZ=UTC`
+
+`TMC_TICK_ON_REQUEST=false` is recommended in production when you run a scheduler, so tick progression does not depend on user API traffic.
 
 ## 5. First Deploy
 
@@ -83,7 +87,29 @@ If your app requires auth for some endpoints, use `/` for health checks.
    - `https://your-domain/`
    - `https://your-domain/api/index.php?action=game_state`
 
-## 8. Troubleshooting
+## 8. Tick Scheduler (Recommended)
+
+Create a scheduled HTTP request in Dokploy (or an external scheduler) every 5 to 15 seconds:
+
+```text
+POST https://your-domain/api/index.php?action=tick
+Header: X-Tick-Secret: <TMC_TICK_SECRET>
+```
+
+Equivalent curl:
+
+```bash
+curl -sS -X POST "https://your-domain/api/index.php?action=tick" \
+  -H "X-Tick-Secret: $TMC_TICK_SECRET"
+```
+
+Expected successful response:
+
+```json
+{"ok":true,"server_now":123456}
+```
+
+## 9. Troubleshooting
 
 - `Database connection failed`:
   - Verify Hostinger allows your VPS IP.
@@ -94,7 +120,12 @@ If your app requires auth for some endpoints, use `/` for health checks.
 - Init returns forbidden:
   - Set `TMC_INIT_SECRET` and use it in the init URL, or run CLI init.
 
-## 9. Stack Clarification
+- Tick endpoint returns forbidden:
+  - Ensure request includes `X-Tick-Secret` matching `TMC_TICK_SECRET`.
+- Tick endpoint returns not configured:
+  - Set `TMC_TICK_SECRET` in Dokploy environment variables.
+
+## 10. Stack Clarification
 
 This deployment uses:
 - Dockerfile

@@ -19,6 +19,7 @@ NC='\033[0m'
 DB_NAME="${TMC_DB_NAME:-too_many_coins}"
 DB_USER="${TMC_DB_USER:-tmc_user}"
 DB_PASS="${TMC_DB_PASS:-$(openssl rand -hex 16)}"
+TICK_SECRET="${TMC_TICK_SECRET:-$(openssl rand -hex 24)}"
 INSTALL_DIR="${TMC_INSTALL_DIR:-/var/www/too-many-coins}"
 DOMAIN="${TMC_DOMAIN:-_}"
 
@@ -33,7 +34,7 @@ echo ""
 # Step 1: Install dependencies
 echo -e "${GREEN}[1/8] Installing dependencies...${NC}"
 apt-get update -y
-apt-get install -y apache2 php php-mysql php-json php-mbstring php-curl mysql-server
+apt-get install -y apache2 php php-mysql php-json php-mbstring php-curl mysql-server curl
 
 # Step 2: Start MySQL
 echo -e "${GREEN}[2/8] Configuring MySQL...${NC}"
@@ -74,6 +75,8 @@ define('DB_HOST', 'localhost');
 define('DB_NAME', '${DB_NAME}');
 define('DB_USER', '${DB_USER}');
 define('DB_PASS', '${DB_PASS}');
+define('TMC_TICK_ON_REQUEST', false);
+define('TMC_TICK_SECRET', '${TICK_SECRET}');
 
 // Game Constants
 define('TIME_SCALE', 60);
@@ -173,8 +176,8 @@ systemctl enable apache2
 echo -e "${GREEN}[8/8] Setting up tick processing cron...${NC}"
 cat > /etc/cron.d/too-many-coins << CRONEOF
 # Process game ticks every 30 seconds
-* * * * * www-data php ${INSTALL_DIR}/api/index.php action=game_state > /dev/null 2>&1
-* * * * * www-data sleep 30 && php ${INSTALL_DIR}/api/index.php action=game_state > /dev/null 2>&1
+* * * * * www-data /usr/bin/curl -fsS -X POST "http://127.0.0.1/api/index.php?action=tick" -H "X-Tick-Secret: ${TICK_SECRET}" > /dev/null 2>&1
+* * * * * www-data sleep 30 && /usr/bin/curl -fsS -X POST "http://127.0.0.1/api/index.php?action=tick" -H "X-Tick-Secret: ${TICK_SECRET}" > /dev/null 2>&1
 CRONEOF
 
 echo ""
@@ -185,10 +188,11 @@ echo ""
 echo -e "  Database: ${DB_NAME}"
 echo -e "  DB User:  ${DB_USER}"
 echo -e "  DB Pass:  ${YELLOW}${DB_PASS}${NC}"
+echo -e "  Tick Key: ${YELLOW}${TICK_SECRET}${NC}"
 echo -e "  URL:      http://${DOMAIN}"
 echo -e "  Install:  ${INSTALL_DIR}"
 echo ""
-echo -e "${YELLOW}IMPORTANT: Save the database password above!${NC}"
+echo -e "${YELLOW}IMPORTANT: Save the database password and tick key above!${NC}"
 echo ""
 echo "To use with a domain name, update /etc/apache2/sites-available/too-many-coins.conf"
 echo "and set ServerName to your domain. Then set up SSL with: certbot --apache -d yourdomain.com"

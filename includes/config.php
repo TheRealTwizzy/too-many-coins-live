@@ -30,6 +30,10 @@ define('BLACKOUT_DURATION', 259200);    // 72 hours in seconds
 // Time scale: 1 = real-time (28-day seasons), 60 = accelerated (11-hour seasons)
 define('TIME_SCALE', (int)(getenv('TMC_TIME_SCALE') ?: 60));
 
+// Tick processing controls
+define('TMC_TICK_ON_REQUEST', filter_var(getenv('TMC_TICK_ON_REQUEST') ?: '1', FILTER_VALIDATE_BOOLEAN));
+define('TMC_TICK_SECRET', env_first(['TMC_TICK_SECRET', 'TICK_SECRET'], ''));
+
 // Activity
 define('IDLE_TIMEOUT_TICKS', 54000);    // 15 real minutes at 60x scale
 

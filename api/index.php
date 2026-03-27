@@ -61,6 +61,12 @@ if ($path === '/api/init_db') {
  require __DIR__ . '/../init_db.php';
  exit;
 }
+
+// Parse request early so tick routing can happen before default tick behavior.
+$action = $_GET['action'] ?? $_POST['action'] ?? '';
+$input = json_decode(file_get_contents('php://input'), true) ?? [];
+$input = array_merge($_GET, $_POST, $input);
+
 // Initialize server state if needed
 $db = Database::getInstance();
 $serverState = $db->fetch("SELECT * FROM server_state WHERE id = 1");
@@ -77,18 +83,45 @@ if (!$serverState) {
     );
 }
 
-// Process game ticks on every API call (lightweight)
-try {
-    TickEngine::processTicks();
-} catch (Exception $e) {
-    // Don't fail API calls due to tick processing errors
-    error_log("Tick error: " . $e->getMessage());
+// Dedicated scheduler endpoint: invoke with action=tick and a valid tick secret.
+if ($action === 'tick') {
+    $providedTickSecret = $input['tick_secret'] ?? ($_SERVER['HTTP_X_TICK_SECRET'] ?? '');
+
+    if (TMC_TICK_SECRET === '') {
+        http_response_code(503);
+        echo json_encode(['error' => 'Tick endpoint is not configured']);
+        exit;
+    }
+
+    if (!hash_equals(TMC_TICK_SECRET, (string)$providedTickSecret)) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Forbidden']);
+        exit;
+    }
+
+    try {
+        TickEngine::processTicks();
+        echo json_encode([
+            'ok' => true,
+            'server_now' => GameTime::now()
+        ]);
+    } catch (Exception $e) {
+        http_response_code(500);
+        echo json_encode(['error' => 'Tick processing failed']);
+        error_log("Tick endpoint error: " . $e->getMessage());
+    }
+    exit;
 }
 
-// Parse request
-$action = $_GET['action'] ?? $_POST['action'] ?? '';
-$input = json_decode(file_get_contents('php://input'), true) ?? [];
-$input = array_merge($_GET, $_POST, $input);
+// Optional fallback: process ticks on normal API requests.
+if (TMC_TICK_ON_REQUEST) {
+    try {
+        TickEngine::processTicks();
+    } catch (Exception $e) {
+        // Don't fail API calls due to tick processing errors
+        error_log("Tick error: " . $e->getMessage());
+    }
+}
 
 try {
     switch ($action) {
@@ -295,7 +328,7 @@ try {
                 'sigil_drops', 'trade_initiate', 'trade_accept', 'trade_decline',
                 'trade_cancel', 'my_trades', 'season_players', 'cosmetic_catalog',
                 'purchase_cosmetic', 'equip_cosmetic', 'my_cosmetics', 'chat_send',
-                'chat_messages', 'profile', 'my_badges', 'season_history'
+                'chat_messages', 'profile', 'my_badges', 'season_history', 'tick'
             ]]);
     }
 } catch (Exception $e) {
