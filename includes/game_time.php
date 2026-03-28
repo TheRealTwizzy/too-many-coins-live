@@ -166,11 +166,11 @@ class GameTime {
                 ]);
                 
                 $vaultConfig = json_encode([
-                    ['tier' => 1, 'supply' => 2000, 'cost_table' => [['remaining' => 1600, 'cost' => 2], ['remaining' => 1200, 'cost' => 3], ['remaining' => 800, 'cost' => 4], ['remaining' => 400, 'cost' => 6], ['remaining' => 200, 'cost' => 9], ['remaining' => 1, 'cost' => 13]]],
-                    ['tier' => 2, 'supply' => 800, 'cost_table' => [['remaining' => 640, 'cost' => 6], ['remaining' => 480, 'cost' => 8], ['remaining' => 320, 'cost' => 11], ['remaining' => 160, 'cost' => 15], ['remaining' => 80, 'cost' => 20], ['remaining' => 1, 'cost' => 28]]],
-                    ['tier' => 3, 'supply' => 250, 'cost_table' => [['remaining' => 200, 'cost' => 18], ['remaining' => 150, 'cost' => 24], ['remaining' => 100, 'cost' => 32], ['remaining' => 50, 'cost' => 44], ['remaining' => 25, 'cost' => 60], ['remaining' => 1, 'cost' => 85]]],
-                    ['tier' => 4, 'supply' => 60, 'cost_table' => [['remaining' => 48, 'cost' => 60], ['remaining' => 36, 'cost' => 80], ['remaining' => 24, 'cost' => 110], ['remaining' => 12, 'cost' => 150], ['remaining' => 6, 'cost' => 210], ['remaining' => 1, 'cost' => 300]]],
-                    ['tier' => 5, 'supply' => 15, 'cost_table' => [['remaining' => 12, 'cost' => 220], ['remaining' => 9, 'cost' => 300], ['remaining' => 6, 'cost' => 420], ['remaining' => 3, 'cost' => 600], ['remaining' => 2, 'cost' => 850], ['remaining' => 1, 'cost' => 1200]]]
+                    ['tier' => 1, 'supply' => 2500, 'cost_table' => [['remaining' => 1, 'cost' => 10]]],
+                    ['tier' => 2, 'supply' => 1000, 'cost_table' => [['remaining' => 1, 'cost' => 25]]],
+                    ['tier' => 3, 'supply' => 500,  'cost_table' => [['remaining' => 1, 'cost' => 50]]],
+                    ['tier' => 4, 'supply' => 250,  'cost_table' => [['remaining' => 1, 'cost' => 100]]],
+                    ['tier' => 5, 'supply' => 100,  'cost_table' => [['remaining' => 1, 'cost' => 250]]]
                 ]);
                 
                 $seasonId = $db->insert(

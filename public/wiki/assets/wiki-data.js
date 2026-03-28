@@ -226,11 +226,11 @@ Tier odds:
             content: `Vault sigils cost **Seasonal Stars** and are disabled in Blackout.
 
 Default vault supply per season:
-- Tier I: 2000
-- Tier II: 800
-- Tier III: 250
-- Tier IV: 60
-- Tier V: 15
+- Tier I: 2500
+- Tier II: 1000
+- Tier III: 500
+- Tier IV: 250
+- Tier V: 100
 
 Boosts consume sigils and can be:
 - **SELF** scope
@@ -245,11 +245,11 @@ Global and self boosts stack additively in fixed-point logic and are capped by a
 
 | Boost | Tier | Scope | Duration | Modifier |
 |---|---|---|---|---|
-| Coin Trickle | I | SELF | 1 tick (1 minute) | +10% |
-| Coin Surge | II | SELF | 2 ticks (2 minutes) | +25% |
-| Golden Flow | III | SELF | 3 ticks (3 minutes) | +50% |
-| Rising Tide | IV | GLOBAL | 60 ticks | +15% |
-| Golden Age | V | GLOBAL | 120 ticks | +30% |`
+| Trickle | I | SELF | 60 ticks (1 hour) | +10% |
+| Surge | II | SELF | 180 ticks (3 hours) | +15% |
+| Flow | III | SELF | 360 ticks (6 hours) | +25% |
+| Tide | IV | SELF | 720 ticks (12 hours) | +50% |
+| Age | V | SELF | 1440 ticks (24 hours) | +100% |`
           }
         ]
       },

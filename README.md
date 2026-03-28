@@ -26,11 +26,11 @@ Too Many Coins is a season-based multiplayer economic strategy game. Players joi
 
 | Boost | Tier | Effect | Duration | Scope |
 |-------|------|--------|----------|-------|
-| Trickle | I | +25% UBI | 15 minutes | Self |
-| Surge | II | +50% UBI | 30 minutes | Self |
-| Flow | III | +75% UBI | 1 hour | Self |
-| Tide | IV | +15% UBI | 24 hours | All Players |
-| Age | V | +30% UBI | 48 hours | All Players |
+| Trickle | I | +10% UBI | 1 hour | Self |
+| Surge | II | +15% UBI | 3 hours | Self |
+| Flow | III | +25% UBI | 6 hours | Self |
+| Tide | IV | +50% UBI | 12 hours | Self |
+| Age | V | +100% UBI | 24 hours | Self |
 
 ## Sigil Drop System
 
@@ -295,13 +295,13 @@ curl -sS -X POST "https://your-domain/api/index.php?action=tick" \
 
 ## Sigil Vault Tiers
 
-| Tier | Supply | Base Cost | Description |
-|------|--------|-----------|-------------|
-| I | 2,000 | 2 stars | Common |
-| II | 800 | 6 stars | Uncommon |
-| III | 250 | 18 stars | Rare |
-| IV | 60 | 60 stars | Epic |
-| V | 15 | 220 stars | Legendary |
+| Tier | Supply | Cost | Description |
+|------|--------|------|-------------|
+| I | 2,500 | 10 stars | Common |
+| II | 1,000 | 25 stars | Uncommon |
+| III | 500 | 50 stars | Rare |
+| IV | 250 | 100 stars | Epic |
+| V | 100 | 250 stars | Legendary |
 
 ## Season Lifecycle
 
