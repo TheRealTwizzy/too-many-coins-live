@@ -32,12 +32,18 @@ Too Many Coins is a season-based multiplayer economic strategy game. Players joi
 | Tide | IV | +50% UBI | 12 hours | Self |
 | Age | V | +100% UBI | 24 hours | Self |
 
+Guaranteed floor policy (hybrid scaling):
+
+- +1 whole Coin per tick per 10% effective boost modifier
+- Applied after percent boost math and before fixed-point mint split
+- No cap by default (`BOOST_GUARANTEED_FLOOR_CAP_COINS = 0`)
+
 ## Sigil Drop System
 
 - **Base Rate**: 1 in 750 per eligible tick (1-minute ticks)
 - **Eligibility**: Must be Online + Participating + Active (not Idle)
 - **Pity Timer**: Guaranteed Tier I drop after 2,000 eligible ticks with no drop
-- **Throttle**: Maximum 3 drops per rolling 1,440-tick window
+- **Throttle**: Maximum 8 drops per rolling 1,440-tick window
 - **Tier Odds**: T1 70%, T2 20%, T3 8%, T4 1.5%, T5 0.5%
 
 ## Tech Stack
@@ -95,6 +101,11 @@ Current hotfix files include:
 
 - `migration_boost_duration_hotfix.sql`
 - `migration_boost_title_case_hotfix.sql`
+
+Optional economy rebalance migration (manual run only):
+
+- `migration_active_season_balance_hybrid_boost_optional.sql`
+- Use this only if you want currently active/scheduled seasons to adopt the new balancing knobs immediately.
 
 Disable auto-hotfixing only if needed:
 

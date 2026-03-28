@@ -36,6 +36,33 @@ class Economy {
     }
 
     /**
+     * Guaranteed whole-coin floor from effective boost modifier.
+     * Example default policy: +1 coin/tick per 10% boost (100,000 fp).
+     */
+    public static function guaranteedBoostFloorCoins($boostModFp, $capCoins = null) {
+        $modFp = max(0, (int)$boostModFp);
+        $stepPercent = max(1, (int)BOOST_GUARANTEED_FLOOR_STEP_PERCENT);
+        $stepCoins = max(1, (int)BOOST_GUARANTEED_FLOOR_STEP_COINS);
+        $fpPerStep = intdiv($stepPercent * FP_SCALE, 100);
+        if ($fpPerStep <= 0) return 0;
+
+        $coins = intdiv($modFp, $fpPerStep) * $stepCoins;
+        $effectiveCap = ($capCoins === null) ? (int)BOOST_GUARANTEED_FLOOR_CAP_COINS : (int)$capCoins;
+        if ($effectiveCap > 0) {
+            $coins = min($coins, $effectiveCap);
+        }
+
+        return max(0, $coins);
+    }
+
+    /**
+     * Fixed-point wrapper for guaranteedBoostFloorCoins().
+     */
+    public static function guaranteedBoostFloorFp($boostModFp, $capCoins = null) {
+        return self::toFixedPoint(self::guaranteedBoostFloorCoins($boostModFp, $capCoins));
+    }
+
+    /**
      * Split fixed-point amount into whole coins and residual fractional fp.
      */
     public static function splitFixedPoint($amountFp) {

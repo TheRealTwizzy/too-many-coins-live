@@ -145,18 +145,18 @@ class GameTime {
                 
                 $inflationTable = json_encode([
                     ['x' => 0, 'factor_fp' => 1000000],
-                    ['x' => 50000, 'factor_fp' => 700000],
-                    ['x' => 200000, 'factor_fp' => 350000],
-                    ['x' => 800000, 'factor_fp' => 150000],
-                    ['x' => 3000000, 'factor_fp' => 70000]
+                    ['x' => 50000, 'factor_fp' => 620000],
+                    ['x' => 200000, 'factor_fp' => 280000],
+                    ['x' => 800000, 'factor_fp' => 110000],
+                    ['x' => 3000000, 'factor_fp' => 50000]
                 ]);
                 
                 $starpriceTable = json_encode([
                     ['m' => 0, 'price' => 100],
-                    ['m' => 25000, 'price' => 250],
-                    ['m' => 100000, 'price' => 700],
-                    ['m' => 500000, 'price' => 2500],
-                    ['m' => 2000000, 'price' => 9000]
+                    ['m' => 25000, 'price' => 300],
+                    ['m' => 100000, 'price' => 900],
+                    ['m' => 500000, 'price' => 3200],
+                    ['m' => 2000000, 'price' => 11000]
                 ]);
                 
                 $tradeFeeTiers = json_encode([
@@ -179,7 +179,7 @@ class GameTime {
                      inflation_table, hoarding_window_ticks, target_spend_rate_per_tick, hoarding_min_factor_fp,
                      starprice_table, star_price_cap, trade_fee_tiers, trade_min_fee_coins,
                      vault_config, current_star_price, last_processed_tick)
-                     VALUES (?, ?, ?, ?, 'Scheduled', 30, 250000, 1, ?, ?, 15, 100000, ?, 10000, ?, 10, ?, 100, ?)",
+                     VALUES (?, ?, ?, ?, 'Scheduled', 30, 250000, 1, ?, ?, 18, 90000, ?, 12000, ?, 10, ?, 100, ?)",
                     [$startTime, $endTime, $blackoutTime, $seed,
                      $inflationTable, HOARDING_WINDOW_TICKS, $starpriceTable, $tradeFeeTiers, $vaultConfig, $startTime]
                 );
@@ -407,27 +407,29 @@ class GameTime {
     private static function rebalanceExistingSeasons($db) {
         $inflationTable = json_encode([
             ['x' => 0, 'factor_fp' => 1000000],
-            ['x' => 50000, 'factor_fp' => 700000],
-            ['x' => 200000, 'factor_fp' => 350000],
-            ['x' => 800000, 'factor_fp' => 150000],
-            ['x' => 3000000, 'factor_fp' => 70000]
+            ['x' => 50000, 'factor_fp' => 620000],
+            ['x' => 200000, 'factor_fp' => 280000],
+            ['x' => 800000, 'factor_fp' => 110000],
+            ['x' => 3000000, 'factor_fp' => 50000]
         ]);
 
         $starpriceTable = json_encode([
             ['m' => 0, 'price' => 100],
-            ['m' => 25000, 'price' => 250],
-            ['m' => 100000, 'price' => 700],
-            ['m' => 500000, 'price' => 2500],
-            ['m' => 2000000, 'price' => 9000]
+            ['m' => 25000, 'price' => 300],
+            ['m' => 100000, 'price' => 900],
+            ['m' => 500000, 'price' => 3200],
+            ['m' => 2000000, 'price' => 11000]
         ]);
 
         $db->query(
             "UPDATE seasons
              SET base_ubi_active_per_tick = 30,
-                 target_spend_rate_per_tick = 15,
+                 target_spend_rate_per_tick = 18,
+                 hoarding_min_factor_fp = 90000,
                  hoarding_window_ticks = ?,
                  inflation_table = ?,
                  starprice_table = ?,
+                 star_price_cap = 12000,
                  current_star_price = GREATEST(current_star_price, 100)
              WHERE base_ubi_active_per_tick = 100
                AND target_spend_rate_per_tick = 50",

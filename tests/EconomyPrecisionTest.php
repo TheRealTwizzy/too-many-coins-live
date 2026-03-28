@@ -7,6 +7,32 @@ require_once __DIR__ . '/../includes/economy.php';
 
 class EconomyPrecisionTest extends TestCase
 {
+    public function testGuaranteedBoostFloorCoinsScalesByTenPercentSteps(): void
+    {
+        $this->assertSame(1, Economy::guaranteedBoostFloorCoins(100000));  // 10%
+        $this->assertSame(2, Economy::guaranteedBoostFloorCoins(200000));  // 20%
+        $this->assertSame(5, Economy::guaranteedBoostFloorCoins(500000));  // 50%
+        $this->assertSame(10, Economy::guaranteedBoostFloorCoins(1000000)); // 100%
+    }
+
+    public function testGuaranteedBoostFloorFpAddsWholeCoinAtTenPercentEvenOnLowBase(): void
+    {
+        $baseUbi = 1;
+        $rateFp = Economy::toFixedPoint($baseUbi);
+        $rateFp = Economy::applyBoostModifierFp($rateFp, 100000); // 10% => 1.1/tick
+        $rateFp += Economy::guaranteedBoostFloorFp(100000); // +1 whole coin floor
+
+        [$coins, $fraction] = Economy::splitFixedPoint($rateFp);
+        $this->assertSame(2, $coins);
+        $this->assertSame(100000, $fraction);
+    }
+
+    public function testSigilThrottleWindowCeilingMatchesConfig(): void
+    {
+        $maxRealizedRate = SIGIL_MAX_DROPS_WINDOW / SIGIL_DROP_WINDOW_TICKS;
+        $this->assertEqualsWithDelta(8 / 1440, $maxRealizedRate, 0.000001);
+    }
+
     public function testTenPercentBoostPreservesFractionalRate(): void
     {
         $baseUbi = 7;

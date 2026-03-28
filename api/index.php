@@ -369,6 +369,7 @@ function calculatePlayerRatePerTick($season, $player, $participation, $activeBoo
     $totalModFp = (int)($activeBoosts['total_modifier_fp'] ?? 0);
 
     $ratePerTickFp = Economy::applyBoostModifierFp($ratePerTickFp, $totalModFp);
+    $ratePerTickFp += Economy::guaranteedBoostFloorFp($totalModFp);
     $ratePerTick = round($ratePerTickFp / FP_SCALE, 2);
 
     return max(0, $ratePerTick);

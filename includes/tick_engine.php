@@ -137,6 +137,7 @@ class TickEngine {
                 $baseUbi = Economy::calculateUBI($season, $p, $p);
                 $ratePerTickFp = Economy::toFixedPoint($baseUbi);
                 $ratePerTickFp = Economy::applyBoostModifierFp($ratePerTickFp, $boostModFp);
+                $ratePerTickFp += Economy::guaranteedBoostFloorFp($boostModFp);
 
                 $carryFp = max(0, (int)($p['coins_fractional_fp'] ?? 0));
                 $totalUbiFp = ($ratePerTickFp * $ticksToProcess) + $carryFp;
@@ -210,8 +211,8 @@ class TickEngine {
     }
     
     /**
-     * Process Sigil drops for a player over a batch of ticks
-     * Implements: Bernoulli 1/50000, pity at 120K, throttle 3 per 86.4K window
+     * Process Sigil drops for a player over a batch of ticks.
+     * Uses configured Bernoulli, pity, and rolling-window throttle limits.
      */
     private static function processSigilDrops($season, $player, $seasonId, $gameTime, $currentSeasonTick, $ticksToProcess, $startTime, $lastSeasonTick) {
         $db = Database::getInstance();
@@ -462,7 +463,7 @@ class TickEngine {
                 // Natural-end conversion: SeasonalStars -> GlobalStars 1:1
                 $seasonalStars = (int)$ef['seasonal_stars'];
                 $globalStarsEarned += $seasonalStars;
-                
+
                 // Apply to player
                 $db->query(
                     "UPDATE players SET global_stars = global_stars + ? WHERE player_id = ?",

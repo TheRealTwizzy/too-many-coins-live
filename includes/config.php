@@ -58,8 +58,14 @@ define('MIN_PARTICIPATION_TICKS', 1);
 // Sigil drops
 define('SIGIL_DROP_RATE', max(1, (int)round(45000 / 60)));  // 1 in 750 (small frequency bump)
 define('SIGIL_PITY_TICKS', ticks_from_real_seconds(120000));
-define('SIGIL_MAX_DROPS_WINDOW', 3);
+define('SIGIL_MAX_DROPS_WINDOW', 8);
 define('SIGIL_DROP_WINDOW_TICKS', ticks_from_real_seconds(86400));
+
+// Guaranteed boost floor: +1 whole coin per tick for each 10% effective boost.
+// Set cap to 0 for no cap.
+define('BOOST_GUARANTEED_FLOOR_STEP_PERCENT', 10);
+define('BOOST_GUARANTEED_FLOOR_STEP_COINS', 1);
+define('BOOST_GUARANTEED_FLOOR_CAP_COINS', 0);
 
 // Sigil tier odds (fixed-point, sum = 1,000,000)
 define('SIGIL_TIER_ODDS', [
