@@ -99,7 +99,7 @@ CREATE TABLE IF NOT EXISTS seasons (
 -- Vault inventory per season per tier
 CREATE TABLE IF NOT EXISTS season_vault (
     season_id BIGINT UNSIGNED NOT NULL,
-    tier TINYINT UNSIGNED NOT NULL,  -- 1-5
+    tier TINYINT UNSIGNED NOT NULL,  -- 1-3 vault tiers only
     initial_supply INT NOT NULL DEFAULT 0,
     remaining_supply INT NOT NULL DEFAULT 0,
     current_cost_stars BIGINT NOT NULL DEFAULT 0,
@@ -118,12 +118,13 @@ CREATE TABLE IF NOT EXISTS season_participation (
     coins BIGINT NOT NULL DEFAULT 0,
     coins_fractional_fp BIGINT NOT NULL DEFAULT 0,
     seasonal_stars BIGINT NOT NULL DEFAULT 0,
-    -- Sigils by tier (1-5)
+    -- Sigils by tier (1-6)
     sigils_t1 INT NOT NULL DEFAULT 0,
     sigils_t2 INT NOT NULL DEFAULT 0,
     sigils_t3 INT NOT NULL DEFAULT 0,
     sigils_t4 INT NOT NULL DEFAULT 0,
     sigils_t5 INT NOT NULL DEFAULT 0,
+    sigils_t6 INT NOT NULL DEFAULT 0,
     -- Sigil drop tracking mirrors runtime state
     sigil_drops_total INT NOT NULL DEFAULT 0,
     eligible_ticks_since_last_drop BIGINT NOT NULL DEFAULT 0,
@@ -155,6 +156,24 @@ CREATE TABLE IF NOT EXISTS season_participation (
     FOREIGN KEY (season_id) REFERENCES seasons(season_id)
 ) ENGINE=InnoDB;
 
+-- Temporary UBI suppression effects applied by Tier 6 sigils.
+CREATE TABLE IF NOT EXISTS active_freezes (
+    freeze_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    source_player_id BIGINT UNSIGNED NOT NULL,
+    target_player_id BIGINT UNSIGNED NOT NULL,
+    season_id BIGINT UNSIGNED NOT NULL,
+    activated_tick BIGINT NOT NULL,
+    expires_tick BIGINT NOT NULL,
+    applied_count INT NOT NULL DEFAULT 1,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_freeze_target (target_player_id, season_id, is_active, expires_tick),
+    INDEX idx_freeze_season (season_id, is_active, expires_tick),
+    FOREIGN KEY (source_player_id) REFERENCES players(player_id),
+    FOREIGN KEY (target_player_id) REFERENCES players(player_id),
+    FOREIGN KEY (season_id) REFERENCES seasons(season_id)
+) ENGINE=InnoDB;
+
 -- ============================================================
 -- TRADES
 -- ============================================================
@@ -167,7 +186,7 @@ CREATE TABLE IF NOT EXISTS trades (
     status ENUM('OPEN', 'ACCEPTED', 'DECLINED', 'CANCELED', 'EXPIRED', 'INVALIDATED') NOT NULL DEFAULT 'OPEN',
     -- Side A (initiator offers)
     side_a_coins BIGINT NOT NULL DEFAULT 0,
-    side_a_sigils JSON NOT NULL,  -- [t1, t2, t3, t4, t5]
+    side_a_sigils JSON NOT NULL,  -- [t1, t2, t3, t4, t5, t6]
     -- Side B (acceptor offers)
     side_b_coins BIGINT NOT NULL DEFAULT 0,
     side_b_sigils JSON NOT NULL,
@@ -198,7 +217,7 @@ CREATE TABLE IF NOT EXISTS economy_ledger (
     season_id BIGINT UNSIGNED DEFAULT NULL,
     season_tick BIGINT DEFAULT NULL,
     player_id BIGINT UNSIGNED DEFAULT NULL,
-    resource_type ENUM('Coins', 'SeasonalStars', 'GlobalStars', 'Sigil_T1', 'Sigil_T2', 'Sigil_T3', 'Sigil_T4', 'Sigil_T5') NOT NULL,
+    resource_type ENUM('Coins', 'SeasonalStars', 'GlobalStars', 'Sigil_T1', 'Sigil_T2', 'Sigil_T3', 'Sigil_T4', 'Sigil_T5', 'Sigil_T6') NOT NULL,
     direction ENUM('MINT', 'BURN', 'TRANSFER', 'RESET_DESTRUCTION') NOT NULL,
     amount BIGINT NOT NULL,
     category VARCHAR(50) NOT NULL,

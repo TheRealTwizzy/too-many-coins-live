@@ -61,6 +61,30 @@ define('SIGIL_PITY_TICKS', ticks_from_real_seconds(120000));
 define('SIGIL_MAX_DROPS_WINDOW', 8);
 define('SIGIL_DROP_WINDOW_TICKS', ticks_from_real_seconds(86400));
 
+// Sigil progression and crafting
+define('SIGIL_MAX_TIER', 6);
+define('SIGIL_COMBINE_RECIPES', [
+    1 => 5,
+    2 => 5,
+    3 => 3,
+    4 => 3,
+    5 => 2,
+]);
+
+// Tier-odds scaling by sigil power. Tier 6 is intentionally excluded from RNG drops.
+define('SIGIL_POWER_FULL_SHIFT', 40);
+define('SIGIL_TIER_ODDS_MAX_POWER', [
+    1 => 50000,
+    2 => 250000,
+    3 => 350000,
+    4 => 250000,
+    5 => 100000,
+]);
+
+// Freeze mechanics (Tier 6 sigil action)
+define('FREEZE_BASE_DURATION_TICKS', ticks_from_real_seconds(1200)); // 20 minutes
+define('FREEZE_STACK_MULTIPLIER_FP', 1250000); // 1.25x
+
 // Guaranteed boost floor: +1 whole coin per tick for each 10% effective boost.
 // Set cap to 0 for no cap.
 define('BOOST_GUARANTEED_FLOOR_STEP_PERCENT', 10);
@@ -69,11 +93,11 @@ define('BOOST_GUARANTEED_FLOOR_CAP_COINS', 0);
 
 // Sigil tier odds (fixed-point, sum = 1,000,000)
 define('SIGIL_TIER_ODDS', [
-    1 => 609757,  // ~0.5039% effective Tier I
-    2 => 243902,  // ~0.2016% effective Tier II
-    3 => 97561,   // ~0.0806% effective Tier III
-    4 => 36585,   // ~0.0302% effective Tier IV
-    5 => 12195    // ~0.0101% effective Tier V
+    1 => 151331,  // ~0.125% effective Tier I baseline
+    2 => 420000,
+    3 => 280000,
+    4 => 120000,
+    5 => 28669
 ]);
 
 // Participation bonus

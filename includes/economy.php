@@ -8,6 +8,55 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/database.php';
 
 class Economy {
+
+    /**
+     * Estimate sigil power from tiered sigil inventory.
+     */
+    public static function calculateSigilPower($participation) {
+        if (!$participation || !is_array($participation)) return 0;
+
+        $weights = [1 => 1, 2 => 2, 3 => 3, 4 => 5, 5 => 8, 6 => 13];
+        $power = 0;
+        foreach ($weights as $tier => $weight) {
+            $col = 'sigils_t' . $tier;
+            $count = (int)($participation[$col] ?? 0);
+            if ($count > 0) {
+                $power += $count * $weight;
+            }
+        }
+
+        return max(0, (int)$power);
+    }
+
+    /**
+     * Blend baseline and max-power tier odds using a linear ramp.
+     */
+    public static function adjustedSigilTierOdds($sigilPower) {
+        $base = SIGIL_TIER_ODDS;
+        $target = SIGIL_TIER_ODDS_MAX_POWER;
+        $fullShift = max(1, (int)SIGIL_POWER_FULL_SHIFT);
+        $power = max(0, (int)$sigilPower);
+        $ratioFp = min(FP_SCALE, intdiv($power * FP_SCALE, $fullShift));
+
+        $tiers = [];
+        $sum = 0;
+        foreach ($base as $tier => $odds) {
+            $from = (int)$odds;
+            $to = (int)($target[$tier] ?? $from);
+            $blended = intdiv(($from * (FP_SCALE - $ratioFp)) + ($to * $ratioFp), FP_SCALE);
+            $tiers[(int)$tier] = max(0, (int)$blended);
+            $sum += $tiers[(int)$tier];
+        }
+
+        if ($sum <= 0) {
+            return $base;
+        }
+
+        // Normalize to exactly 1,000,000 without reordering odds.
+        $delta = 1000000 - $sum;
+        $tiers[1] = max(0, (int)$tiers[1] + $delta);
+        return $tiers;
+    }
     
     /**
      * Fixed-point multiply with floor: floor(base * mult_fp / 1_000_000)
@@ -231,7 +280,7 @@ class Economy {
         
         // Calculate side A value
         $valueA = $sideACoins;
-        for ($t = 1; $t <= 5; $t++) {
+        for ($t = 1; $t <= SIGIL_MAX_TIER; $t++) {
             if (isset($sideASigils[$t - 1]) && $sideASigils[$t - 1] > 0) {
                 $sigilCostStars = $vaultCosts[$t] ?? 0;
                 $valueA += $sideASigils[$t - 1] * $sigilCostStars * $starPrice;
@@ -240,7 +289,7 @@ class Economy {
         
         // Calculate side B value
         $valueB = $sideBCoins;
-        for ($t = 1; $t <= 5; $t++) {
+        for ($t = 1; $t <= SIGIL_MAX_TIER; $t++) {
             if (isset($sideBSigils[$t - 1]) && $sideBSigils[$t - 1] > 0) {
                 $sigilCostStars = $vaultCosts[$t] ?? 0;
                 $valueB += $sideBSigils[$t - 1] * $sigilCostStars * $starPrice;
@@ -271,9 +320,10 @@ class Economy {
     
     /**
      * Process Sigil drop for a player
-     * Returns tier number (1-5) or 0 for no drop
+    * Returns tier number (1-5) or 0 for no drop.
+    * Tier odds are shifted by sigil power, but Tier 6 is never randomly dropped.
      */
-    public static function processSigilDrop($season, $playerId, $seasonTick) {
+    public static function processSigilDrop($season, $playerId, $seasonTick, $sigilPower = 0) {
         // Deterministic RNG using SHA-256.
         // Use 'J' (unsigned 64-bit big-endian) instead of 'P' (machine byte-order) so
         // the hash input is identical on every platform/PHP build.
@@ -295,7 +345,8 @@ class Economy {
         $tierRoll = unpack('N', substr($hash, 4, 4))[1] % 1000000;
         
         $cumulative = 0;
-        foreach (SIGIL_TIER_ODDS as $tier => $odds) {
+        $tierOdds = self::adjustedSigilTierOdds($sigilPower);
+        foreach ($tierOdds as $tier => $odds) {
             $cumulative += $odds;
             if ($tierRoll < $cumulative) return $tier;
         }

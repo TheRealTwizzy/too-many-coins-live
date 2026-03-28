@@ -117,6 +117,7 @@ class TickEngine {
         try {
             // Phase 2: System-event phase - expire old boosts
             self::expireBoosts($seasonId, $gameTime);
+            self::expireFreezes($seasonId, $gameTime);
             
             // Get active global boosts for UBI modifier calculation
             $globalBoosts = self::getActiveGlobalBoosts($seasonId, $gameTime);
@@ -134,11 +135,16 @@ class TickEngine {
                 // Phase 5: UBI accrual with boost modifiers
                 $selfBoosts = self::getActivePlayerBoosts($playerId, $seasonId, $gameTime);
                 $boostModFp = self::calculateBoostModifier($selfBoosts, $globalBoosts);
+                $isFrozen = self::isPlayerFrozen($playerId, $seasonId, $gameTime);
                 
                 $baseUbi = Economy::calculateUBI($season, $p, $p);
                 $ratePerTickFp = Economy::toFixedPoint($baseUbi);
                 $ratePerTickFp = Economy::applyBoostModifierFp($ratePerTickFp, $boostModFp);
                 $ratePerTickFp += Economy::guaranteedBoostFloorFp($boostModFp);
+                if ($isFrozen) {
+                    // Freeze suppresses boost effect only; base UBI still accrues.
+                    $ratePerTickFp = Economy::toFixedPoint($baseUbi);
+                }
 
                 $carryFp = max(0, (int)($p['coins_fractional_fp'] ?? 0));
                 $totalUbiFp = ($ratePerTickFp * $ticksToProcess) + $carryFp;
@@ -280,7 +286,8 @@ class TickEngine {
                 continue;
             }
 
-            $tier = Economy::processSigilDrop($season, $playerId, $absoluteTick);
+            $sigilPower = Economy::calculateSigilPower($player);
+            $tier = Economy::processSigilDrop($season, $playerId, $absoluteTick, $sigilPower);
             if ($tier > 0) {
                 self::awardSigilDrop($playerId, $seasonId, $tier, $absoluteTick, 'RNG');
                 $dropsAwarded++;
@@ -366,6 +373,31 @@ class TickEngine {
              WHERE season_id = ? AND is_active = 1 AND expires_tick < ?",
             [$seasonId, $gameTime]
         );
+    }
+
+    /**
+     * Expire freeze effects that have elapsed.
+     */
+    private static function expireFreezes($seasonId, $gameTime) {
+        $db = Database::getInstance();
+        $db->query(
+            "UPDATE active_freezes SET is_active = 0
+             WHERE season_id = ? AND is_active = 1 AND expires_tick < ?",
+            [$seasonId, $gameTime]
+        );
+    }
+
+    /**
+     * Check whether a player is currently frozen.
+     */
+    private static function isPlayerFrozen($playerId, $seasonId, $gameTime) {
+        $db = Database::getInstance();
+        $row = $db->fetch(
+            "SELECT COUNT(*) AS cnt FROM active_freezes
+             WHERE target_player_id = ? AND season_id = ? AND is_active = 1 AND expires_tick >= ?",
+            [$playerId, $seasonId, $gameTime]
+        );
+        return ((int)($row['cnt'] ?? 0)) > 0;
     }
     
     /**
@@ -518,7 +550,7 @@ class TickEngine {
                     "UPDATE season_participation SET 
                      global_stars_earned = ?, participation_bonus = ?, placement_bonus = ?,
                      seasonal_stars = 0, coins = 0, 
-                     sigils_t1 = 0, sigils_t2 = 0, sigils_t3 = 0, sigils_t4 = 0, sigils_t5 = 0,
+                     sigils_t1 = 0, sigils_t2 = 0, sigils_t3 = 0, sigils_t4 = 0, sigils_t5 = 0, sigils_t6 = 0,
                      active_boosts = NULL
                      WHERE player_id = ? AND season_id = ?",
                     [$globalStarsEarned, $participationBonus, $placementBonus, $ef['player_id'], $seasonId]

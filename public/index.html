@@ -113,7 +113,6 @@
                             <label>Password</label>
                             <input type="password" id="login-password" class="input-field" required placeholder="Your password" autocomplete="current-password">
                         </div>
-                        <div id="login-error" class="form-error"></div>
                         <button type="submit" class="btn btn-primary btn-lg btn-full">Login</button>
                     </form>
                     <form id="register-form" class="auth-form" style="display:none;" onsubmit="TMC.register(event)">
@@ -130,7 +129,6 @@
                             <label>Password</label>
                             <input type="password" id="reg-password" class="input-field" required minlength="6" placeholder="Min 6 characters" autocomplete="new-password">
                         </div>
-                        <div id="register-error" class="form-error"></div>
                         <button type="submit" class="btn btn-primary btn-lg btn-full">Create Account</button>
                     </form>
                 </div>
@@ -247,9 +245,6 @@
                 <span class="bottom-nav-label">Shop</span>
             </button>
         </nav>
-
-        <!-- TOAST NOTIFICATIONS -->
-        <div id="toast-container"></div>
 
         <!-- NOTIFICATION CENTER -->
         <div id="notification-center" class="notification-center" onclick="event.stopPropagation()">

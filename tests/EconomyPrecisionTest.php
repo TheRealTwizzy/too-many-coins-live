@@ -63,6 +63,6 @@ class EconomyPrecisionTest extends TestCase
         $tierOneConditional = SIGIL_TIER_ODDS[1] / FP_SCALE;
         $effectivePercent = $basePercent * $tierOneConditional;
 
-        $this->assertEqualsWithDelta(0.093333, $effectivePercent, 0.000001);
+        $this->assertEqualsWithDelta(0.125067, $effectivePercent, 0.000001);
     }
 }

@@ -1644,6 +1644,14 @@ a:hover { text-decoration: underline; }
     color: #fb923c;
 }
 
+.notification-item.notification-warning .notification-category {
+    color: #f97316;
+}
+
+.notification-item.notification-error .notification-category {
+    color: #ef4444;
+}
+
 .notification-item.notification-purchase {
     border-left: 3px solid rgba(252, 211, 77, 0.55);
 }
@@ -1670,6 +1678,14 @@ a:hover { text-decoration: underline; }
 
 .notification-item.notification-status {
     border-left: 3px solid rgba(251, 146, 60, 0.55);
+}
+
+.notification-item.notification-warning {
+    border-left: 3px solid rgba(249, 115, 22, 0.7);
+}
+
+.notification-item.notification-error {
+    border-left: 3px solid rgba(239, 68, 68, 0.75);
 }
 
 .notification-time {

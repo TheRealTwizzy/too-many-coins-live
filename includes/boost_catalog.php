@@ -19,6 +19,7 @@ class BoostCatalog
             'name' => 'Trickle',
             'scope' => 'SELF',
             'duration_seconds' => 1 * 60 * 60,
+            'time_extension_seconds' => 15 * 60,
             'modifier_fp' => 100000,
             'max_stack' => 5,
             'icon' => 'trickle',
@@ -28,6 +29,7 @@ class BoostCatalog
             'name' => 'Surge',
             'scope' => 'SELF',
             'duration_seconds' => 3 * 60 * 60,
+            'time_extension_seconds' => 30 * 60,
             'modifier_fp' => 150000,
             'max_stack' => 5,
             'icon' => 'surge',
@@ -37,8 +39,9 @@ class BoostCatalog
             'name' => 'Flow',
             'scope' => 'SELF',
             'duration_seconds' => 6 * 60 * 60,
+            'time_extension_seconds' => 45 * 60,
             'modifier_fp' => 250000,
-            'max_stack' => 2,
+            'max_stack' => 3,
             'icon' => 'flow',
             'sigil_cost' => 1,
         ],
@@ -46,8 +49,9 @@ class BoostCatalog
             'name' => 'Tide',
             'scope' => 'SELF',
             'duration_seconds' => 12 * 60 * 60,
+            'time_extension_seconds' => 60 * 60,
             'modifier_fp' => 500000,
-            'max_stack' => 1,
+            'max_stack' => 3,
             'icon' => 'tide',
             'sigil_cost' => 1,
         ],
@@ -55,6 +59,7 @@ class BoostCatalog
             'name' => 'Age',
             'scope' => 'SELF',
             'duration_seconds' => 24 * 60 * 60,
+            'time_extension_seconds' => 90 * 60,
             'modifier_fp' => 1000000,
             'max_stack' => 1,
             'icon' => 'age',
@@ -74,10 +79,23 @@ class BoostCatalog
         $boost['description'] = '';
         $boost['scope'] = $canonical['scope'];
         $boost['duration_ticks'] = ticks_from_real_seconds($canonical['duration_seconds']);
-        $boost['modifier_fp'] = $canonical['modifier_fp'];
+        $boost['time_extension_ticks'] = ticks_from_real_seconds($canonical['time_extension_seconds']);
+        $boost['base_modifier_fp'] = $canonical['modifier_fp'];
+
+        // Preserve runtime modifier value from active_boosts rows.
+        if (array_key_exists('modifier_fp', $boost)) {
+            $boost['modifier_fp'] = (int)$boost['modifier_fp'];
+        } else {
+            $boost['modifier_fp'] = $canonical['modifier_fp'];
+        }
+
         $boost['max_stack'] = $canonical['max_stack'];
         $boost['icon'] = $canonical['icon'];
         $boost['sigil_cost'] = $canonical['sigil_cost'];
+        $boost['current_stack'] = max(0, min(
+            (int)$boost['max_stack'],
+            (int)ceil(max(0, (int)$boost['modifier_fp']) / max(1, (int)$boost['base_modifier_fp']))
+        ));
 
         return $boost;
     }

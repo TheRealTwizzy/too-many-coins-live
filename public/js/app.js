@@ -120,10 +120,9 @@ const TMC = {
         e.preventDefault();
         const email = document.getElementById('login-email').value;
         const password = document.getElementById('login-password').value;
-        document.getElementById('login-error').textContent = '';
         const result = await this.api('login', { email, password });
         if (result.error) {
-            document.getElementById('login-error').textContent = result.error;
+            this.toast(result.error, 'error', { category: 'error_auth' });
             return;
         }
         localStorage.setItem('tmc_token', result.token);
@@ -150,10 +149,9 @@ const TMC = {
         const handle = document.getElementById('reg-handle').value;
         const email = document.getElementById('reg-email').value;
         const password = document.getElementById('reg-password').value;
-        document.getElementById('register-error').textContent = '';
         const result = await this.api('register', { handle, email, password });
         if (result.error) {
-            document.getElementById('register-error').textContent = result.error;
+            this.toast(result.error, 'error', { category: 'error_auth' });
             return;
         }
         localStorage.setItem('tmc_token', result.token);
@@ -622,16 +620,14 @@ const TMC = {
             if (el.textContent.includes('Current price:')) {
                 el.innerHTML = `Current price: <strong>${this.formatNumber(season.current_star_price)} coins</strong> per star`;
             }
-            if (el.textContent.includes('Your coins:')) {
-                el.innerHTML = `Your coins: <strong>${this.formatNumber(p.participation.coins)}</strong>`;
-            }
         });
 
         // Update sigil counts
         const sigilCounts = document.querySelectorAll('.sigil-count');
-        if (sigilCounts.length === 5) {
-            p.participation.sigils.forEach((count, i) => {
-                sigilCounts[i].textContent = count;
+        const visibleSigils = this.getVisibleSigils(p.participation);
+        if (sigilCounts.length === visibleSigils.length) {
+            visibleSigils.forEach((row, i) => {
+                sigilCounts[i].textContent = row.count;
             });
         }
 
@@ -651,8 +647,9 @@ const TMC = {
     async loadSeasonDetail(seasonId) {
         const detail = await this.api('season_detail', { season_id: seasonId });
         if (detail.error) {
+            this.toast(detail.error, 'error', { category: 'error_action' });
             document.getElementById('season-detail-content').innerHTML =
-                `<div class="error-state"><p>${detail.error}</p></div>`;
+                `<div class="error-state"><p>Season details are temporarily unavailable.</p></div>`;
             return;
         }
         this.renderSeasonDetail(seasonId, detail);
@@ -678,6 +675,10 @@ const TMC = {
                 sigilRateByTier[rateRow.tier] = Number(rateRow.chance_percent || 0);
             }
         });
+        const combineRecipes = (p && p.participation && Array.isArray(p.participation.combine_recipes))
+            ? p.participation.combine_recipes
+            : [];
+        const visibleCombineRecipes = combineRecipes.filter((recipe) => !!recipe.can_combine);
 
         let html = `
             <div class="season-header">
@@ -719,7 +720,6 @@ const TMC = {
                     <div class="action-panel">
                         <h3>Purchase Seasonal Stars</h3>
                         <p class="panel-info">Current price: <strong>${this.formatNumber(detail.current_star_price)} coins</strong> per star</p>
-                        <p class="panel-info">Your coins: <strong>${this.formatNumber(part.coins)}</strong></p>
                         <div class="action-row">
                             <input type="number" id="purchase-stars" min="1" placeholder="Star quantity" class="input-field" oninput="TMC.updatePurchaseEstimate()">
                             <button id="purchase-stars-btn" class="btn btn-primary" onclick="TMC.purchaseStars()" ${isBlackout ? 'disabled' : ''}>Buy Stars</button>
@@ -732,14 +732,41 @@ const TMC = {
                     <div class="action-panel">
                         <h3>Sigils</h3>
                         <div class="sigil-display">
-                            ${part.sigils.map((count, i) => `
-                                <div class="sigil-item tier-${i+1}">
-                                    <span class="sigil-tier">T${i+1}</span>
-                                    <span class="sigil-count">${count}</span>
-                                    <span class="sigil-rate">${this.formatPercentCompact(sigilRateByTier[i + 1] || 0)}%</span>
+                            ${this.getVisibleSigils(part).map((sigil) => `
+                                <div class="sigil-item tier-${sigil.tier}">
+                                    <span class="sigil-tier">T${sigil.tier}</span>
+                                    <span class="sigil-count">${sigil.count}</span>
+                                    ${sigil.tier <= 5 ? `<span class="sigil-rate">${this.formatPercentCompact(sigilRateByTier[sigil.tier] || 0)}%</span>` : '<span class="sigil-rate">Crafted only</span>'}
                                 </div>
                             `).join('')}
                         </div>
+                        <div class="sigil-combine-section">
+                            <h4>Sigil Forge</h4>
+                            <div class="vault-grid">
+                                ${visibleCombineRecipes.map((recipe) => `
+                                    <div class="vault-item tier-${recipe.from_tier}">
+                                        <span class="vault-tier">T${recipe.from_tier} x${recipe.required} to T${recipe.to_tier}</span>
+                                        <span class="vault-remaining">Owned: ${recipe.owned}</span>
+                                        <button class="btn btn-sm btn-primary"
+                                            onclick="TMC.combineSigil(${recipe.from_tier})"
+                                            ${!recipe.can_combine || isBlackout ? 'disabled' : ''}>
+                                            Combine
+                                        </button>
+                                    </div>
+                                `).join('')}
+                            </div>
+                            ${visibleCombineRecipes.length === 0 ? '<p class="panel-info">No combinations currently available.</p>' : ''}
+                        </div>
+                        ${part.can_freeze ? `
+                            <div class="sigil-freeze-section">
+                                <h4>Tier 6 Freeze</h4>
+                                <p class="panel-info">Consume 1 Tier 6 sigil to nullify a target's boost percentage while boosts continue to count down.</p>
+                                <div class="action-row">
+                                    <input type="text" id="freeze-target-handle" class="input-field" placeholder="Target handle">
+                                    <button class="btn btn-danger" onclick="TMC.freezeByHandle()" ${isBlackout ? 'disabled' : ''}>Freeze by Handle</button>
+                                </div>
+                            </div>
+                        ` : ''}
                         <div class="sigil-vault-section">
                             <h4>Sigil Vault</h4>
                             <p class="panel-info">Purchase Sigils with Seasonal Stars</p>
@@ -808,6 +835,7 @@ const TMC = {
                             <th>Seasonal Stars</th>
                             <th>Coins</th>
                             <th>Status</th>
+                            ${isParticipating && part && part.can_freeze ? '<th>Action</th>' : ''}
                         </tr>
                     </thead>
                     <tbody id="season-lb-body">
@@ -846,7 +874,8 @@ const TMC = {
         }
         if (empty) empty.style.display = 'none';
 
-        body.innerHTML = this.renderSeasonLeaderboardRows(lb);
+        const includeActions = !!(this.state.currentScreen === 'season-detail' && this.state.player && this.state.player.participation && this.state.player.participation.can_freeze);
+        body.innerHTML = this.renderSeasonLeaderboardRows(lb, includeActions);
     },
 
     // ==================== ACTIONS ====================
@@ -989,6 +1018,86 @@ const TMC = {
         if (this.state.currentSeason) this.loadSeasonDetail(this.state.currentSeason);
     },
 
+    getVisibleSigils(participation) {
+        const sigils = Array.isArray(participation?.sigils) ? participation.sigils : [];
+        const visible = [];
+        for (let tier = 1; tier <= 5; tier++) {
+            visible.push({ tier, count: Number(sigils[tier - 1] || 0) });
+        }
+
+        const hasTier6 = Number(sigils[5] || 0) > 0;
+        const canRevealTier6 = !!participation?.tier6_visible || !!(participation?.combine_recipes || []).find((r) => Number(r.from_tier) === 5 && !!r.can_combine);
+        if (hasTier6 || canRevealTier6) {
+            visible.push({ tier: 6, count: Number(sigils[5] || 0) });
+        }
+
+        return visible;
+    },
+
+    async combineSigil(fromTier) {
+        const result = await this.api('combine_sigil', { from_tier: fromTier });
+        if (result.error) {
+            this.toast(result.error, 'error', { category: 'error_action' });
+            return;
+        }
+        this.toast(result.message || `Combined Tier ${fromTier} sigils.`, 'success', {
+            category: 'sigil_combine',
+            payload: {
+                from_tier: Number(result.from_tier) || Number(fromTier),
+                to_tier: Number(result.to_tier) || (Number(fromTier) + 1),
+                consumed: Number(result.consumed) || 0,
+                produced: Number(result.produced) || 1
+            }
+        });
+        await this.refreshGameState();
+        if (this.state.currentSeason) this.loadSeasonDetail(this.state.currentSeason);
+    },
+
+    async freezeByPlayerId(targetPlayerId) {
+        const result = await this.api('freeze_player_ubi', { target_player_id: targetPlayerId });
+        if (result.error) {
+            this.toast(result.error, 'error', { category: 'error_action' });
+            return;
+        }
+        this.toast(result.message || 'Freeze applied.', 'success', {
+            category: 'freeze_apply',
+            payload: {
+                target_player_id: Number(result.target_player_id) || Number(targetPlayerId),
+                freeze_duration_ticks: Number(result.freeze_duration_ticks) || 0,
+                expires_tick: Number(result.expires_tick) || null
+            }
+        });
+        await this.refreshGameState();
+        if (this.state.currentSeason) this.loadSeasonDetail(this.state.currentSeason);
+    },
+
+    async freezeByHandle() {
+        const input = document.getElementById('freeze-target-handle');
+        const targetHandle = input ? String(input.value || '').trim() : '';
+        if (!targetHandle) {
+            this.toast('Enter a target handle.', 'error', { category: 'error_validation' });
+            return;
+        }
+
+        const result = await this.api('freeze_player_ubi', { target_handle: targetHandle });
+        if (result.error) {
+            this.toast(result.error, 'error', { category: 'error_action' });
+            return;
+        }
+        this.toast(result.message || 'Freeze applied.', 'success', {
+            category: 'freeze_apply',
+            payload: {
+                target_player_id: Number(result.target_player_id) || null,
+                target_handle: result.target_handle || targetHandle,
+                freeze_duration_ticks: Number(result.freeze_duration_ticks) || 0,
+                expires_tick: Number(result.expires_tick) || null
+            }
+        });
+        if (input) input.value = '';
+        await this.refreshGameState();
+        if (this.state.currentSeason) this.loadSeasonDetail(this.state.currentSeason);
+    },
+
     // ==================== BOOSTS ====================
     _boostCatalog: null,
     _boostCatalogCollapsed: true,
@@ -1040,6 +1149,7 @@ const TMC = {
 
         const p = this.state.player;
         const part = p ? p.participation : null;
+        const activeSelfBoosts = (p && p.active_boosts && Array.isArray(p.active_boosts.self)) ? p.active_boosts.self : [];
         const tierNames = ['', 'Common', 'Uncommon', 'Rare', 'Epic', 'Legendary'];
         const tierIcons = ['', '&#9672;', '&#9670;', '&#9733;', '&#10038;', '&#9830;'];
 
@@ -1048,6 +1158,11 @@ const TMC = {
             const hasSigil = part && part.sigils[tier - 1] >= parseInt(b.sigil_cost);
             const modPercent = (parseInt(b.modifier_fp) / 10000).toFixed(1);
             const durationTicks = parseInt(b.duration_ticks);
+            const timeExtensionTicks = parseInt(b.time_extension_ticks || 0);
+            const activeBoost = activeSelfBoosts.find((ab) => parseInt(ab.tier_required) === tier) || null;
+            const currentStack = activeBoost ? (parseInt(activeBoost.current_stack || 0) || 0) : 0;
+            const maxStack = parseInt(b.max_stack || 0) || 0;
+            const canBuyTime = !!activeBoost;
             const description = this.getBoostDescription(b);
             const displayName = this.getBoostDisplayName(b.name);
             const displayIcon = this.getBoostDisplayIcon(b.icon, tierIcons[tier]);
@@ -1072,14 +1187,22 @@ const TMC = {
                             <span class="boost-modifier">+${modPercent}% UBI</span>
                             <span class="boost-duration">${durationLabel}</span>
                         </div>
+                        <span class="boost-have boost-have-inline">Power: ${currentStack}/${maxStack}</span>
                         <span class="boost-have boost-have-inline">(You have: ${part ? part.sigils[tier-1] : 0})</span>
                     </div>
                     ${description ? `<p class="boost-desc">${this.escapeHtml(description)}</p>` : ''}
-                    <button class="btn btn-sm ${hasSigil ? 'btn-primary' : 'btn-outline'}" 
-                        onclick="TMC.activateBoost(${b.boost_id})" 
-                        ${!hasSigil ? 'disabled title="Not enough Sigils"' : ''}>
-                        Activate
-                    </button>
+                    <div class="action-row">
+                        <button class="btn btn-sm ${hasSigil ? 'btn-primary' : 'btn-outline'}"
+                            onclick="TMC.purchaseBoostPower(${b.boost_id})"
+                            ${!hasSigil ? 'disabled title="Not enough Sigils"' : ''}>
+                            Power +${modPercent}%
+                        </button>
+                        <button class="btn btn-sm ${hasSigil ? 'btn-outline' : 'btn-outline'}"
+                            onclick="TMC.purchaseBoostTime(${b.boost_id})"
+                            ${(!hasSigil || !canBuyTime) ? 'disabled title="Activate boost power first"' : ''}>
+                            Time +${timeExtensionTicks}m
+                        </button>
+                    </div>
                 </div>
             `;
         }).join('');
@@ -1184,14 +1307,14 @@ const TMC = {
         container.innerHTML = html;
     },
 
-    async activateBoost(boostId) {
+    async purchaseBoostPower(boostId) {
         const boost = this._boostCatalog ? this._boostCatalog.find(b => b.boost_id == boostId) : null;
         const name = boost ? this.getBoostDisplayName(boost.name) : `Boost #${boostId}`;
-        if (!confirm(`Activate ${name}?\n\nThis will consume ${boost ? boost.sigil_cost : 1} Tier ${boost ? boost.tier_required : '?'} Sigil(s).`)) {
+        if (!confirm(`Purchase ${name} power?\n\nThis will consume ${boost ? boost.sigil_cost : 1} Tier ${boost ? boost.tier_required : '?'} Sigil(s).`)) {
             return;
         }
 
-        const result = await this.api('purchase_boost', { boost_id: boostId });
+        const result = await this.api('purchase_boost', { boost_id: boostId, purchase_kind: 'power' });
         if (result.error) {
             this.toast(result.error, 'error');
             return;
@@ -1201,6 +1324,30 @@ const TMC = {
             payload: {
                 boost_id: Number(boostId) || null,
                 season_id: Number(this.state.currentSeason) || null
+            }
+        });
+        await this.refreshGameState();
+        this.loadBoostCatalog();
+    },
+
+    async purchaseBoostTime(boostId) {
+        const boost = this._boostCatalog ? this._boostCatalog.find(b => b.boost_id == boostId) : null;
+        const name = boost ? this.getBoostDisplayName(boost.name) : `Boost #${boostId}`;
+        if (!confirm(`Purchase ${name} time extension?\n\nThis will consume ${boost ? boost.sigil_cost : 1} Tier ${boost ? boost.tier_required : '?'} Sigil(s).`)) {
+            return;
+        }
+
+        const result = await this.api('purchase_boost', { boost_id: boostId, purchase_kind: 'time' });
+        if (result.error) {
+            this.toast(result.error, 'error');
+            return;
+        }
+        this.toast(result.message, 'success', {
+            category: 'boost_activate',
+            payload: {
+                boost_id: Number(boostId) || null,
+                season_id: Number(this.state.currentSeason) || null,
+                purchase_kind: 'time'
             }
         });
         await this.refreshGameState();
@@ -1280,7 +1427,8 @@ const TMC = {
         theadRow.innerHTML = columns.map((c) => `<th>${c}</th>`).join('');
     },
 
-    renderSeasonLeaderboardRows(entries) {
+    renderSeasonLeaderboardRows(entries, includeActions = false) {
+        const canFreeze = includeActions && !!(this.state.player && this.state.player.participation && this.state.player.participation.can_freeze);
         return entries.map((entry, i) => {
             const rank = entry.final_rank || (i + 1);
             const isLockedIn = entry.lock_in_effect_tick !== null;
@@ -1304,6 +1452,7 @@ const TMC = {
                     <td class="stars-cell">${this.formatNumber(entry.seasonal_stars)}</td>
                     <td class="stars-cell">${this.formatNumber(entry.coins || 0)}</td>
                     <td class="status-cell">${statusBadge}</td>
+                    ${canFreeze ? `<td class="status-cell">${(!isMe && entry.activity_state === 'Active') ? `<button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); TMC.freezeByPlayerId(${entry.player_id})">Freeze</button>` : ''}</td>` : ''}
                 </tr>
             `;
         }).join('');
@@ -1461,6 +1610,10 @@ const TMC = {
         const otherPlayers = (players || []).filter(p => p.player_id != this.state.player.player_id);
 
         const part = this.state.player.participation;
+        const tradeTiers = [1, 2, 3, 4, 5];
+        if (Number((part.sigils || [])[5] || 0) > 0) {
+            tradeTiers.push(6);
+        }
 
         content.innerHTML = `
             <h2>Trade Center</h2>
@@ -1475,12 +1628,15 @@ const TMC = {
                             <label>Coins (you have ${this.formatNumber(part.coins)})</label>
                             <input type="number" id="trade-a-coins" min="0" max="${part.coins}" value="0" class="input-field">
                         </div>
-                        ${part.sigils.map((count, i) => `
+                        ${tradeTiers.map((tier) => {
+                            const count = Number((part.sigils || [])[tier - 1] || 0);
+                            return `
                             <div class="form-group">
-                                <label>Tier ${i+1} Sigils (you have ${count})</label>
-                                <input type="number" id="trade-a-sigil-${i}" min="0" max="${count}" value="0" class="input-field input-sm">
+                                <label>Tier ${tier} Sigils (you have ${count})</label>
+                                <input type="number" id="trade-a-sigil-${tier - 1}" min="0" max="${count}" value="0" class="input-field input-sm">
                             </div>
-                        `).join('')}
+                        `;
+                        }).join('')}
                     </div>
                     <div class="trade-arrow">&#8644;</div>
                     <div class="trade-side">
@@ -1489,7 +1645,7 @@ const TMC = {
                             <label>Coins</label>
                             <input type="number" id="trade-b-coins" min="0" value="0" class="input-field">
                         </div>
-                        ${[1,2,3,4,5].map(t => `
+                        ${tradeTiers.map(t => `
                             <div class="form-group">
                                 <label>Tier ${t} Sigils</label>
                                 <input type="number" id="trade-b-sigil-${t-1}" min="0" value="0" class="input-field input-sm">
@@ -1533,9 +1689,15 @@ const TMC = {
         }
 
         const sideACoins = parseInt(document.getElementById('trade-a-coins').value) || 0;
-        const sideASigils = [0,1,2,3,4].map(i => parseInt(document.getElementById(`trade-a-sigil-${i}`).value) || 0);
+        const sideASigils = [0,1,2,3,4,5].map(i => {
+            const el = document.getElementById(`trade-a-sigil-${i}`);
+            return el ? (parseInt(el.value) || 0) : 0;
+        });
         const sideBCoins = parseInt(document.getElementById('trade-b-coins').value) || 0;
-        const sideBSigils = [0,1,2,3,4].map(i => parseInt(document.getElementById(`trade-b-sigil-${i}`).value) || 0);
+        const sideBSigils = [0,1,2,3,4,5].map(i => {
+            const el = document.getElementById(`trade-b-sigil-${i}`);
+            return el ? (parseInt(el.value) || 0) : 0;
+        });
 
         const result = await this.api('trade_initiate', {
             acceptor_id: parseInt(targetId),
@@ -1727,7 +1889,8 @@ const TMC = {
         const content = document.getElementById('profile-content');
 
         if (profile.error) {
-            content.innerHTML = `<div class="error-state"><p>${profile.error}</p></div>`;
+            this.toast(profile.error, 'error', { category: 'error_action' });
+            content.innerHTML = `<div class="error-state"><p>Profile is temporarily unavailable.</p></div>`;
             return;
         }
 
@@ -1756,6 +1919,9 @@ const TMC = {
 
         const activeParticipation = profile.active_participation;
         const activeSigils = Array.isArray(activeParticipation?.sigils) ? activeParticipation.sigils : [];
+        const visibleProfileSigils = activeSigils
+            .map((count, idx) => ({ tier: idx + 1, count: Number(count || 0) }))
+            .filter((row) => row.tier <= 5 || row.count > 0);
         const season = activeParticipation?.season_id
             ? this.state.seasons.find((s) => s.season_id == activeParticipation.season_id)
             : null;
@@ -1783,10 +1949,10 @@ const TMC = {
                     </div>
                 </div>
                 <div class="sigil-display profile-sigil-display">
-                    ${activeSigils.map((count, i) => `
-                        <div class="sigil-item tier-${i+1}">
-                            <span class="sigil-tier">T${i+1}</span>
-                            <span class="sigil-count">${count}</span>
+                    ${visibleProfileSigils.map((row) => `
+                        <div class="sigil-item tier-${row.tier}">
+                            <span class="sigil-tier">T${row.tier}</span>
+                            <span class="sigil-count">${row.count}</span>
                         </div>
                     `).join('')}
                 </div>
@@ -2121,6 +2287,13 @@ const TMC = {
             trade_offer_sent: { label: 'Trade', icon: 'Swap', tone: 'trade' },
             trade_completed: { label: 'Trade', icon: 'Check', tone: 'trade' },
             sigil_drop: { label: 'Sigil Drop', icon: 'Gift', tone: 'drop' },
+            sigil_combine: { label: 'Sigil Forge', icon: 'Anvil', tone: 'progress' },
+            freeze_apply: { label: 'Freeze', icon: 'Snow', tone: 'warning' },
+            error_auth: { label: 'Auth Error', icon: 'Alert', tone: 'error' },
+            error_action: { label: 'Action Failed', icon: 'X', tone: 'error' },
+            error_validation: { label: 'Validation', icon: 'Info', tone: 'error' },
+            warning_general: { label: 'Warning', icon: 'Alert', tone: 'warning' },
+            info_general: { label: 'Info', icon: 'Info', tone: 'default' },
             idle: { label: 'Idle', icon: 'Pause', tone: 'status' },
             active: { label: 'Active', icon: 'Play', tone: 'status' }
         };
@@ -2216,21 +2389,14 @@ const TMC = {
     },
 
     toast(message, type = 'info', options = {}) {
-        if (type === 'success') {
-            this.pushSuccessNotification(message, options);
-            return;
-        }
-
-        const container = document.getElementById('toast-container');
-        const toast = document.createElement('div');
-        toast.className = `toast toast-${type}`;
-        toast.textContent = message;
-        container.appendChild(toast);
-        setTimeout(() => toast.classList.add('toast-show'), 10);
-        setTimeout(() => {
-            toast.classList.remove('toast-show');
-            setTimeout(() => toast.remove(), 300);
-        }, 4000);
+        const categoryMap = {
+            success: 'gameplay_success',
+            error: 'error_action',
+            warning: 'warning_general',
+            info: 'info_general'
+        };
+        const category = (options && options.category) ? options.category : (categoryMap[type] || 'info_general');
+        this.pushSuccessNotification(message, { ...options, category });
     }
 };
 

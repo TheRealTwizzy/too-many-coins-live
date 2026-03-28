@@ -166,11 +166,9 @@ class GameTime {
                 ]);
                 
                 $vaultConfig = json_encode([
-                    ['tier' => 1, 'supply' => 2500, 'cost_table' => [['remaining' => 1, 'cost' => 5]]],
-                    ['tier' => 2, 'supply' => 1000, 'cost_table' => [['remaining' => 1, 'cost' => 25]]],
-                    ['tier' => 3, 'supply' => 500,  'cost_table' => [['remaining' => 1, 'cost' => 75]]],
-                    ['tier' => 4, 'supply' => 250,  'cost_table' => [['remaining' => 1, 'cost' => 150]]],
-                    ['tier' => 5, 'supply' => 100,  'cost_table' => [['remaining' => 1, 'cost' => 300]]]
+                    ['tier' => 1, 'supply' => 500, 'cost_table' => [['remaining' => 1, 'cost' => 50]]],
+                    ['tier' => 2, 'supply' => 250, 'cost_table' => [['remaining' => 1, 'cost' => 125]]],
+                    ['tier' => 3, 'supply' => 100, 'cost_table' => [['remaining' => 1, 'cost' => 275]]]
                 ]);
                 
                 $seasonId = $db->insert(

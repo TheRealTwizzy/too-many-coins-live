@@ -186,6 +186,21 @@ try {
             $tier = (int)($input['tier'] ?? 0);
             echo json_encode(Actions::purchaseVaultSigil($player['player_id'], $tier));
             break;
+
+        case 'combine_sigil':
+            $player = Auth::requireAuth();
+            $fromTier = (int)($input['from_tier'] ?? 0);
+            echo json_encode(Actions::combineSigils($player['player_id'], $fromTier));
+            break;
+
+        case 'freeze_player_ubi':
+            $player = Auth::requireAuth();
+            echo json_encode(Actions::freezePlayerUbi(
+                $player['player_id'],
+                (int)($input['target_player_id'] ?? 0),
+                isset($input['target_handle']) ? (string)$input['target_handle'] : null
+            ));
+            break;
             
         case 'lock_in':
             $player = Auth::requireAuth();
@@ -205,7 +220,8 @@ try {
         case 'purchase_boost':
             $player = Auth::requireAuth();
             $boostId = (int)($input['boost_id'] ?? 0);
-            echo json_encode(Actions::purchaseBoost($player['player_id'], $boostId));
+            $purchaseKind = (string)($input['purchase_kind'] ?? 'power');
+            echo json_encode(Actions::purchaseBoost($player['player_id'], $boostId, $purchaseKind));
             break;
             
         case 'active_boosts':
@@ -292,9 +308,9 @@ try {
                 $player['player_id'],
                 (int)($input['acceptor_id'] ?? 0),
                 (int)($input['side_a_coins'] ?? 0),
-                $input['side_a_sigils'] ?? [0,0,0,0,0],
+                $input['side_a_sigils'] ?? [0,0,0,0,0,0],
                 (int)($input['side_b_coins'] ?? 0),
-                $input['side_b_sigils'] ?? [0,0,0,0,0]
+                $input['side_b_sigils'] ?? [0,0,0,0,0,0]
             ));
             break;
             
@@ -393,6 +409,7 @@ try {
             echo json_encode(['error' => 'Unknown action', 'available_actions' => [
                 'register', 'login', 'logout', 'game_state', 'season_detail', 'leaderboard',
                 'global_leaderboard', 'season_join', 'purchase_stars', 'purchase_vault',
+                'combine_sigil', 'freeze_player_ubi',
                 'lock_in', 'idle_ack', 'boost_catalog', 'purchase_boost', 'active_boosts',
                 'sigil_drops', 'trade_initiate', 'trade_accept', 'trade_decline',
                 'trade_cancel', 'my_trades', 'season_players', 'cosmetic_catalog',
@@ -433,6 +450,9 @@ function getSigilDropRateMetadata() {
 
 function calculatePlayerRatePerTick($season, $player, $participation, $activeBoosts) {
     if (!$season || !$participation) return 0;
+    if (isPlayerFrozen((int)$player['player_id'], (int)$season['season_id'])) {
+        return max(0, round((float)Economy::calculateUBI($season, $player, $participation), 2));
+    }
 
     $baseUbi = Economy::calculateUBI($season, $player, $participation);
     $ratePerTickFp = Economy::toFixedPoint($baseUbi);
@@ -514,14 +534,19 @@ function getGameState($player) {
                     (int)$participation['sigils_t2'],
                     (int)$participation['sigils_t3'],
                     (int)$participation['sigils_t4'],
-                    (int)$participation['sigils_t5']
+                    (int)$participation['sigils_t5'],
+                    (int)($participation['sigils_t6'] ?? 0)
                 ],
-                'sigils_total' => (int)$participation['sigils_t1'] + (int)$participation['sigils_t2'] + (int)$participation['sigils_t3'] + (int)$participation['sigils_t4'] + (int)$participation['sigils_t5'],
+                'sigils_total' => (int)$participation['sigils_t1'] + (int)$participation['sigils_t2'] + (int)$participation['sigils_t3'] + (int)$participation['sigils_t4'] + (int)$participation['sigils_t5'] + (int)($participation['sigils_t6'] ?? 0),
                 'participation_time' => (int)$participation['participation_time_total'],
                 'active_ticks' => (int)$participation['active_ticks_total'],
                 'lock_in_stars' => $participation['lock_in_snapshot_seasonal_stars'],
                 'sigil_drops_total' => (int)($participation['sigil_drops_total'] ?? 0),
                 'eligible_ticks_since_last_drop' => (int)($participation['eligible_ticks_since_last_drop'] ?? 0),
+                'combine_recipes' => getCombineRecipesForParticipation($participation),
+                'tier6_visible' => shouldRevealTier6($participation),
+                'can_freeze' => ((int)($participation['sigils_t6'] ?? 0) > 0),
+                'freeze' => getFreezeStatusForPlayer((int)$player['player_id'], (int)$player['joined_season_id']),
                 'rate_per_tick' => $ratePerTick,
             ] : null,
             'active_boosts' => $activeBoosts,
@@ -612,6 +637,19 @@ function getSeasonDetail($player, $seasonId) {
         [$seasonId]
     );
     $season['sigil_drop_rates'] = getSigilDropRateMetadata();
+
+    if ($player && (int)$player['joined_season_id'] === (int)$seasonId && (int)$player['participation_enabled'] === 1) {
+        $participation = $db->fetch(
+            "SELECT * FROM season_participation WHERE player_id = ? AND season_id = ?",
+            [(int)$player['player_id'], (int)$seasonId]
+        );
+        if ($participation) {
+            $season['player_combine_recipes'] = getCombineRecipesForParticipation($participation);
+            $season['player_tier6_visible'] = shouldRevealTier6($participation);
+            $season['player_can_freeze'] = ((int)($participation['sigils_t6'] ?? 0) > 0);
+            $season['player_freeze'] = getFreezeStatusForPlayer((int)$player['player_id'], (int)$seasonId);
+        }
+    }
     
     // Top players
     if ($season['computed_status'] === 'Active' || $season['computed_status'] === 'Blackout') {
@@ -839,7 +877,7 @@ function getProfile($viewer, $targetId) {
             $status = GameTime::getSeasonStatus($season);
             if ($status === 'Active') {
                 $participation = $db->fetch(
-                    "SELECT coins, sigils_t1, sigils_t2, sigils_t3, sigils_t4, sigils_t5
+                    "SELECT coins, sigils_t1, sigils_t2, sigils_t3, sigils_t4, sigils_t5, sigils_t6
                      FROM season_participation
                      WHERE player_id = ? AND season_id = ?",
                     [$targetId, $target['joined_season_id']]
@@ -853,7 +891,8 @@ function getProfile($viewer, $targetId) {
                             (int)$participation['sigils_t2'],
                             (int)$participation['sigils_t3'],
                             (int)$participation['sigils_t4'],
-                            (int)$participation['sigils_t5']
+                            (int)$participation['sigils_t5'],
+                            (int)($participation['sigils_t6'] ?? 0)
                         ]
                     ];
                 }
@@ -986,4 +1025,57 @@ function getNotificationIdsFromInput($input) {
         return [$input['notification_id']];
     }
     return [];
+}
+
+function getCombineRecipesForParticipation($participation) {
+    $recipes = [];
+    foreach (SIGIL_COMBINE_RECIPES as $fromTier => $required) {
+        $fromCol = 'sigils_t' . (int)$fromTier;
+        $owned = (int)($participation[$fromCol] ?? 0);
+        $recipes[] = [
+            'from_tier' => (int)$fromTier,
+            'to_tier' => (int)$fromTier + 1,
+            'required' => (int)$required,
+            'owned' => $owned,
+            'can_combine' => $owned >= (int)$required,
+        ];
+    }
+    return $recipes;
+}
+
+function shouldRevealTier6($participation) {
+    $ownedT6 = (int)($participation['sigils_t6'] ?? 0);
+    if ($ownedT6 > 0) return true;
+    $ownedT5 = (int)($participation['sigils_t5'] ?? 0);
+    $required = (int)(SIGIL_COMBINE_RECIPES[5] ?? 2);
+    return $ownedT5 >= $required;
+}
+
+function isPlayerFrozen($playerId, $seasonId) {
+    $db = Database::getInstance();
+    $gameTime = GameTime::now();
+    $row = $db->fetch(
+        "SELECT COUNT(*) AS cnt FROM active_freezes WHERE target_player_id = ? AND season_id = ? AND is_active = 1 AND expires_tick >= ?",
+        [(int)$playerId, (int)$seasonId, (int)$gameTime]
+    );
+    return ((int)($row['cnt'] ?? 0)) > 0;
+}
+
+function getFreezeStatusForPlayer($playerId, $seasonId) {
+    if (!$seasonId) return ['is_frozen' => false, 'remaining_ticks' => 0, 'expires_tick' => null];
+    $db = Database::getInstance();
+    $gameTime = GameTime::now();
+    $row = $db->fetch(
+        "SELECT expires_tick FROM active_freezes
+         WHERE target_player_id = ? AND season_id = ? AND is_active = 1 AND expires_tick >= ?
+         ORDER BY expires_tick DESC LIMIT 1",
+        [(int)$playerId, (int)$seasonId, (int)$gameTime]
+    );
+    if (!$row) return ['is_frozen' => false, 'remaining_ticks' => 0, 'expires_tick' => null];
+    $expiresTick = (int)$row['expires_tick'];
+    return [
+        'is_frozen' => true,
+        'remaining_ticks' => max(0, $expiresTick - (int)$gameTime),
+        'expires_tick' => $expiresTick,
+    ];
 }

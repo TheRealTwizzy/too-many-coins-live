@@ -56,7 +56,7 @@ class Actions {
                 $db->query(
                     "UPDATE season_participation SET 
                      coins = 0, coins_fractional_fp = 0, seasonal_stars = 0,
-                     sigils_t1 = 0, sigils_t2 = 0, sigils_t3 = 0, sigils_t4 = 0, sigils_t5 = 0,
+                     sigils_t1 = 0, sigils_t2 = 0, sigils_t3 = 0, sigils_t4 = 0, sigils_t5 = 0, sigils_t6 = 0,
                      participation_ticks_since_join = 0, spend_window_total = 0,
                      active_boosts = NULL
                      WHERE player_id = ? AND season_id = ?",
@@ -195,7 +195,7 @@ class Actions {
         }
         
         $tier = (int)$tier;
-        if ($tier < 1 || $tier > 5) return ['error' => 'Invalid tier'];
+        if ($tier < 1 || $tier > 3) return ['error' => 'Invalid tier'];
         
         $vault = $db->fetch(
             "SELECT * FROM season_vault WHERE season_id = ? AND tier = ?",
@@ -307,7 +307,7 @@ class Actions {
             $db->query(
                 "UPDATE season_participation SET 
                  coins = 0, coins_fractional_fp = 0, seasonal_stars = 0,
-                 sigils_t1 = 0, sigils_t2 = 0, sigils_t3 = 0, sigils_t4 = 0, sigils_t5 = 0,
+                 sigils_t1 = 0, sigils_t2 = 0, sigils_t3 = 0, sigils_t4 = 0, sigils_t5 = 0, sigils_t6 = 0,
                  active_boosts = NULL
                  WHERE player_id = ? AND season_id = ?",
                 [$playerId, $seasonId]
@@ -400,7 +400,7 @@ class Actions {
         );
         
         if ($participation['coins'] < $aCoins) return ['error' => 'Insufficient coins'];
-        for ($t = 0; $t < 5; $t++) {
+        for ($t = 0; $t < SIGIL_MAX_TIER; $t++) {
             $sigilCol = 'sigils_t' . ($t + 1);
             if (($sideASigils[$t] ?? 0) > $participation[$sigilCol]) {
                 return ['error' => 'Insufficient Tier ' . ($t + 1) . ' Sigils'];
@@ -425,7 +425,7 @@ class Actions {
                 "UPDATE season_participation SET coins = coins - ? WHERE player_id = ? AND season_id = ?",
                 [$aCoins + $fee, $playerId, $seasonId]
             );
-            for ($t = 0; $t < 5; $t++) {
+            for ($t = 0; $t < SIGIL_MAX_TIER; $t++) {
                 if (($sideASigils[$t] ?? 0) > 0) {
                     $col = 'sigils_t' . ($t + 1);
                     $db->query(
@@ -492,7 +492,7 @@ class Actions {
         if ($participation['coins'] < $sideBCoins + $fee) {
             return ['error' => 'Insufficient coins to accept trade (including fee)'];
         }
-        for ($t = 0; $t < 5; $t++) {
+        for ($t = 0; $t < SIGIL_MAX_TIER; $t++) {
             $col = 'sigils_t' . ($t + 1);
             if (($sideBSigils[$t] ?? 0) > $participation[$col]) {
                 return ['error' => 'Insufficient Tier ' . ($t + 1) . ' Sigils'];
@@ -509,7 +509,7 @@ class Actions {
                 "UPDATE season_participation SET coins = coins - ? WHERE player_id = ? AND season_id = ?",
                 [$sideBCoins + $fee, $playerId, $seasonId]
             );
-            for ($t = 0; $t < 5; $t++) {
+            for ($t = 0; $t < SIGIL_MAX_TIER; $t++) {
                 if (($sideBSigils[$t] ?? 0) > 0) {
                     $col = 'sigils_t' . ($t + 1);
                     $db->query(
@@ -524,7 +524,7 @@ class Actions {
                 "UPDATE season_participation SET coins = coins + ? WHERE player_id = ? AND season_id = ?",
                 [$sideACoins, $playerId, $seasonId]
             );
-            for ($t = 0; $t < 5; $t++) {
+            for ($t = 0; $t < SIGIL_MAX_TIER; $t++) {
                 if (($sideASigils[$t] ?? 0) > 0) {
                     $col = 'sigils_t' . ($t + 1);
                     $db->query(
@@ -539,7 +539,7 @@ class Actions {
                 "UPDATE season_participation SET coins = coins + ? WHERE player_id = ? AND season_id = ?",
                 [$sideBCoins, $initiatorId, $seasonId]
             );
-            for ($t = 0; $t < 5; $t++) {
+            for ($t = 0; $t < SIGIL_MAX_TIER; $t++) {
                 if (($sideBSigils[$t] ?? 0) > 0) {
                     $col = 'sigils_t' . ($t + 1);
                     $db->query(
@@ -605,7 +605,7 @@ class Actions {
                 "UPDATE season_participation SET coins = coins + ? WHERE player_id = ? AND season_id = ?",
                 [$sideACoins + $fee, $initiatorId, $seasonId]
             );
-            for ($t = 0; $t < 5; $t++) {
+            for ($t = 0; $t < SIGIL_MAX_TIER; $t++) {
                 if (($sideASigils[$t] ?? 0) > 0) {
                     $col = 'sigils_t' . ($t + 1);
                     $db->query(
@@ -742,7 +742,7 @@ class Actions {
      * Per canon: player submits boost_id, server validates sigil tier requirement,
      * destroys the sigil, and activates the boost for its duration.
      */
-    public static function purchaseBoost($playerId, $boostId) {
+    public static function purchaseBoost($playerId, $boostId, $purchaseKind = 'power') {
         $db = Database::getInstance();
         $player = $db->fetch("SELECT * FROM players WHERE player_id = ?", [$playerId]);
         
@@ -774,7 +774,9 @@ class Actions {
         $sigilCost = (int)$boost['sigil_cost'];
         $scope = $boost['scope'];
         $durationTicks = (int)$boost['duration_ticks'];
+        $timeExtensionTicks = (int)($boost['time_extension_ticks'] ?? 0);
         $modifierFp = (int)$boost['modifier_fp'];
+        $baseModifierFp = (int)($boost['base_modifier_fp'] ?? $modifierFp);
         $maxStack = (int)$boost['max_stack'];
         
         // Get participation
@@ -788,46 +790,80 @@ class Actions {
         if ((int)$participation[$sigilCol] < $sigilCost) {
             return ['error' => "Insufficient Tier {$tierRequired} Sigils. Need {$sigilCost}, have {$participation[$sigilCol]}"];
         }
-        
-        // Check max stack
+
+        $purchaseKind = strtolower(trim((string)$purchaseKind));
+        if ($purchaseKind !== 'power' && $purchaseKind !== 'time') {
+            $purchaseKind = 'power';
+        }
+
+        // Load currently-active boost rows (legacy-safe; collapse multiple rows).
         $gameTime = GameTime::now();
-        if ($scope === 'SELF') {
-            $activeCount = $db->fetch(
-                "SELECT COUNT(*) as cnt FROM active_boosts 
-                 WHERE player_id = ? AND season_id = ? AND boost_id = ? AND is_active = 1 AND expires_tick >= ?",
-                [$playerId, $seasonId, $boostId, $gameTime]
-            )['cnt'];
-        } else {
-            // For GLOBAL boosts, check if this player already has one active
-            $activeCount = $db->fetch(
-                "SELECT COUNT(*) as cnt FROM active_boosts 
-                 WHERE player_id = ? AND season_id = ? AND boost_id = ? AND is_active = 1 AND expires_tick >= ?",
-                [$playerId, $seasonId, $boostId, $gameTime]
-            )['cnt'];
+        $activeRows = $db->fetchAll(
+            "SELECT * FROM active_boosts
+             WHERE player_id = ? AND season_id = ? AND boost_id = ? AND is_active = 1 AND expires_tick >= ?
+             ORDER BY expires_tick DESC, id ASC",
+            [$playerId, $seasonId, $boostId, $gameTime]
+        );
+
+        $active = count($activeRows) > 0 ? $activeRows[0] : null;
+        $extraRows = count($activeRows) > 1 ? array_slice($activeRows, 1) : [];
+
+        $currentModifier = (int)($active['modifier_fp'] ?? 0);
+        $currentStacks = (int)ceil(max(0, $currentModifier) / max(1, $baseModifierFp));
+        $currentStacks = max(0, min($maxStack, $currentStacks));
+
+        if ($purchaseKind === 'time' && !$active) {
+            return ['error' => 'Activate boost power first before purchasing additional time'];
         }
-        
-        if ($activeCount >= $maxStack) {
-            return ['error' => 'Maximum active instances of this boost reached'];
+        if ($purchaseKind === 'power' && $active && $currentStacks >= $maxStack) {
+            return ['error' => 'Maximum boost power reached for this tier'];
         }
-        
-        $expiresTick = $gameTime + $durationTicks;
         
         $db->beginTransaction();
         try {
-            // 1. Consume sigil(s)
+            // Consume sigil cost for either power or time purchase.
             $db->query(
                 "UPDATE season_participation SET {$sigilCol} = {$sigilCol} - ? WHERE player_id = ? AND season_id = ?",
                 [$sigilCost, $playerId, $seasonId]
             );
+
+            if ($purchaseKind === 'power') {
+                if ($active) {
+                    $newModifier = min($baseModifierFp * $maxStack, $currentModifier + $baseModifierFp);
+                    $db->query(
+                        "UPDATE active_boosts
+                         SET modifier_fp = ?, activated_tick = ?, is_active = 1
+                         WHERE id = ?",
+                        [$newModifier, $gameTime, (int)$active['id']]
+                    );
+                    $expiresTick = (int)$active['expires_tick'];
+                } else {
+                    $expiresTick = $gameTime + $durationTicks;
+                    $db->query(
+                        "INSERT INTO active_boosts (player_id, season_id, boost_id, scope, modifier_fp, activated_tick, expires_tick, is_active)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
+                        [$playerId, $seasonId, $boostId, $scope, $baseModifierFp, $gameTime, $expiresTick]
+                    );
+                    $newModifier = $baseModifierFp;
+                }
+            } else {
+                $extendTicks = max(1, $timeExtensionTicks);
+                $expiresTick = max((int)$active['expires_tick'], $gameTime) + $extendTicks;
+                $newModifier = (int)$active['modifier_fp'];
+                $db->query(
+                    "UPDATE active_boosts
+                     SET expires_tick = ?, activated_tick = ?, is_active = 1
+                     WHERE id = ?",
+                    [$expiresTick, $gameTime, (int)$active['id']]
+                );
+            }
+
+            // Deactivate any legacy duplicates so each boost tier is unique per player.
+            foreach ($extraRows as $row) {
+                $db->query("UPDATE active_boosts SET is_active = 0 WHERE id = ?", [(int)$row['id']]);
+            }
             
-            // 2. Create active boost record
-            $db->query(
-                "INSERT INTO active_boosts (player_id, season_id, boost_id, scope, modifier_fp, activated_tick, expires_tick, is_active)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
-                [$playerId, $seasonId, $boostId, $scope, $modifierFp, $gameTime, $expiresTick]
-            );
-            
-            // 3. Update activity
+            // Update activity
             $db->query(
                 "UPDATE players SET last_activity_tick = ?, activity_state = 'Active', idle_modal_active = 0 WHERE player_id = ?",
                 [$gameTime, $playerId]
@@ -836,20 +872,212 @@ class Actions {
             $db->commit();
             
             $scopeLabel = ($scope === 'GLOBAL') ? 'all players in the season' : 'you';
+            $newStacks = max(0, min($maxStack, (int)ceil(max(0, $newModifier) / max(1, $baseModifierFp))));
             return [
                 'success' => true,
                 'boost_name' => $boost['name'],
+                'purchase_kind' => $purchaseKind,
                 'scope' => $scope,
-                'modifier_percent' => round($modifierFp / 10000, 1),
+                'modifier_percent' => round($newModifier / 10000, 1),
+                'stack_count' => $newStacks,
+                'max_stack' => $maxStack,
                 'duration_ticks' => $durationTicks,
+                'time_extension_ticks' => $timeExtensionTicks,
                 'expires_tick' => $expiresTick,
                 'sigils_consumed' => $sigilCost,
                 'tier_consumed' => $tierRequired,
-                'message' => "{$boost['name']} activated! UBI +" . round($modifierFp / 10000, 1) . "% for {$scopeLabel}."
+                'message' => ($purchaseKind === 'power')
+                    ? "{$boost['name']} power purchased. Total UBI +" . round($newModifier / 10000, 1) . "% for {$scopeLabel}."
+                    : "{$boost['name']} timer extended by {$timeExtensionTicks} ticks."
             ];
         } catch (Exception $e) {
             $db->rollback();
             return ['error' => 'Boost activation failed: ' . $e->getMessage()];
+        }
+    }
+
+    /**
+     * Combine same-tier sigils into the next tier.
+     */
+    public static function combineSigils($playerId, $fromTier) {
+        $db = Database::getInstance();
+        $player = $db->fetch("SELECT * FROM players WHERE player_id = ?", [$playerId]);
+
+        if (!$player['participation_enabled'] || !$player['joined_season_id']) {
+            return ['error' => 'Not participating in any season'];
+        }
+        if ($player['idle_modal_active']) {
+            return ['error' => 'Cannot perform actions while idle', 'reason_code' => 'idle_gated'];
+        }
+
+        $seasonId = (int)$player['joined_season_id'];
+        $season = $db->fetch("SELECT * FROM seasons WHERE season_id = ?", [$seasonId]);
+        $status = GameTime::getSeasonStatus($season);
+        if ($status !== 'Active') {
+            return ['error' => 'Combining sigils is only available during active season'];
+        }
+
+        $fromTier = (int)$fromTier;
+        if ($fromTier < 1 || $fromTier >= SIGIL_MAX_TIER) {
+            return ['error' => 'Invalid source tier'];
+        }
+
+        $required = (int)(SIGIL_COMBINE_RECIPES[$fromTier] ?? 0);
+        if ($required <= 0) {
+            return ['error' => 'This combine recipe is unavailable'];
+        }
+
+        $toTier = $fromTier + 1;
+        $fromCol = 'sigils_t' . $fromTier;
+        $toCol = 'sigils_t' . $toTier;
+
+        $participation = $db->fetch(
+            "SELECT {$fromCol}, {$toCol} FROM season_participation WHERE player_id = ? AND season_id = ?",
+            [$playerId, $seasonId]
+        );
+
+        $owned = (int)($participation[$fromCol] ?? 0);
+        if ($owned < $required) {
+            return ['error' => "Insufficient Tier {$fromTier} Sigils. Need {$required}, have {$owned}"];
+        }
+
+        $db->beginTransaction();
+        try {
+            $db->query(
+                "UPDATE season_participation
+                 SET {$fromCol} = {$fromCol} - ?, {$toCol} = {$toCol} + 1
+                 WHERE player_id = ? AND season_id = ?",
+                [$required, $playerId, $seasonId]
+            );
+
+            $db->query(
+                "UPDATE players SET last_activity_tick = ?, activity_state = 'Active', idle_modal_active = 0 WHERE player_id = ?",
+                [GameTime::now(), $playerId]
+            );
+
+            $db->commit();
+            return [
+                'success' => true,
+                'from_tier' => $fromTier,
+                'to_tier' => $toTier,
+                'consumed' => $required,
+                'produced' => 1,
+                'message' => "Combined {$required} Tier {$fromTier} sigils into 1 Tier {$toTier} sigil."
+            ];
+        } catch (Exception $e) {
+            $db->rollback();
+            return ['error' => 'Sigil combine failed'];
+        }
+    }
+
+    /**
+     * Consume a Tier 6 sigil to freeze another player's UBI generation.
+     */
+    public static function freezePlayerUbi($playerId, $targetPlayerId = null, $targetHandle = null) {
+        $db = Database::getInstance();
+        $player = $db->fetch("SELECT * FROM players WHERE player_id = ?", [$playerId]);
+
+        if (!$player['participation_enabled'] || !$player['joined_season_id']) {
+            return ['error' => 'Not participating in any season'];
+        }
+        if ($player['idle_modal_active']) {
+            return ['error' => 'Cannot perform actions while idle', 'reason_code' => 'idle_gated'];
+        }
+
+        $seasonId = (int)$player['joined_season_id'];
+        $season = $db->fetch("SELECT * FROM seasons WHERE season_id = ?", [$seasonId]);
+        $status = GameTime::getSeasonStatus($season);
+        if ($status !== 'Active') {
+            return ['error' => 'Freeze is only available during active season'];
+        }
+
+        $target = null;
+        $targetPlayerId = (int)$targetPlayerId;
+        if ($targetPlayerId > 0) {
+            $target = $db->fetch(
+                "SELECT player_id, handle FROM players WHERE player_id = ? AND joined_season_id = ? AND participation_enabled = 1",
+                [$targetPlayerId, $seasonId]
+            );
+        } elseif ($targetHandle !== null && trim((string)$targetHandle) !== '') {
+            $target = $db->fetch(
+                "SELECT player_id, handle FROM players WHERE handle_lower = ? AND joined_season_id = ? AND participation_enabled = 1",
+                [strtolower(trim((string)$targetHandle)), $seasonId]
+            );
+        }
+
+        if (!$target) {
+            return ['error' => 'Target player not found in this active season'];
+        }
+        if ((int)$target['player_id'] === (int)$playerId) {
+            return ['error' => 'You cannot freeze yourself'];
+        }
+
+        $participation = $db->fetch(
+            "SELECT sigils_t6 FROM season_participation WHERE player_id = ? AND season_id = ?",
+            [$playerId, $seasonId]
+        );
+        if ((int)($participation['sigils_t6'] ?? 0) < 1) {
+            return ['error' => 'You need at least 1 Tier 6 sigil'];
+        }
+
+        $nowTick = GameTime::now();
+        $existing = $db->fetch(
+            "SELECT freeze_id, expires_tick FROM active_freezes
+             WHERE season_id = ? AND target_player_id = ? AND is_active = 1 AND expires_tick >= ?
+             ORDER BY expires_tick DESC LIMIT 1",
+            [$seasonId, (int)$target['player_id'], $nowTick]
+        );
+
+        $newRemaining = (int)FREEZE_BASE_DURATION_TICKS;
+        if ($existing) {
+            $existingRemaining = max(0, (int)$existing['expires_tick'] - $nowTick);
+            if ($existingRemaining > 0) {
+                $newRemaining = max(1, intdiv($existingRemaining * (int)FREEZE_STACK_MULTIPLIER_FP, FP_SCALE));
+            }
+        }
+        $newExpires = $nowTick + $newRemaining;
+
+        $db->beginTransaction();
+        try {
+            $db->query(
+                "UPDATE season_participation SET sigils_t6 = sigils_t6 - 1 WHERE player_id = ? AND season_id = ?",
+                [$playerId, $seasonId]
+            );
+
+            if ($existing) {
+                $db->query(
+                    "UPDATE active_freezes
+                     SET source_player_id = ?, activated_tick = ?, expires_tick = ?, applied_count = applied_count + 1, is_active = 1
+                     WHERE freeze_id = ?",
+                    [$playerId, $nowTick, $newExpires, (int)$existing['freeze_id']]
+                );
+            } else {
+                $db->query(
+                    "INSERT INTO active_freezes
+                     (source_player_id, target_player_id, season_id, activated_tick, expires_tick, applied_count, is_active)
+                     VALUES (?, ?, ?, ?, ?, 1, 1)",
+                    [$playerId, (int)$target['player_id'], $seasonId, $nowTick, $newExpires]
+                );
+            }
+
+            $db->query(
+                "UPDATE players SET last_activity_tick = ?, activity_state = 'Active', idle_modal_active = 0 WHERE player_id = ?",
+                [$nowTick, $playerId]
+            );
+
+            $db->commit();
+
+            return [
+                'success' => true,
+                'target_player_id' => (int)$target['player_id'],
+                'target_handle' => (string)$target['handle'],
+                'freeze_duration_ticks' => $newRemaining,
+                'expires_tick' => $newExpires,
+                'message' => 'Freeze applied to ' . $target['handle'] . ' for ' . $newRemaining . ' ticks.'
+            ];
+        } catch (Exception $e) {
+            $db->rollback();
+            return ['error' => 'Freeze action failed'];
         }
     }
 }
