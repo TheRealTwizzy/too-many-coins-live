@@ -391,7 +391,6 @@ const TMC = {
         const ratePerTick = Number(p.participation.rate_per_tick || 0);
         const rateEl = document.getElementById('hud-rate');
         if (rateEl) rateEl.textContent = this.formatNumber(ratePerTick);
-        document.getElementById('hud-global-stars').textContent = this.formatNumber(p.global_stars);
 
         // Boost total modifier only
         const boosts = p.active_boosts || { self: [], global: [], total_modifier_percent: 0 };
@@ -1048,7 +1047,6 @@ const TMC = {
                         <div class="boost-inline-meta">
                             <span class="boost-modifier">+${modPercent}% UBI</span>
                             <span class="boost-duration">${durationLabel}</span>
-                            <span class="boost-cost-inline">${b.sigil_cost} Tier ${tier} Sigil${parseInt(b.sigil_cost) > 1 ? 's' : ''}</span>
                         </div>
                         <span class="boost-have boost-have-inline">(You have: ${part ? part.sigils[tier-1] : 0})</span>
                     </div>

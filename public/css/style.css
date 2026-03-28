@@ -45,6 +45,7 @@
     --transition: 0.2s ease;
     --safe-bottom: env(safe-area-inset-bottom, 0px);
     --safe-top: env(safe-area-inset-top, 0px);
+    --top-bar-height: 52px;
     --bottom-nav-height: 0px;
 }
 
@@ -97,6 +98,7 @@ a:hover { text-decoration: underline; }
 #top-bar {
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border-color);
+    height: var(--top-bar-height);
     position: sticky;
     top: 0;
     z-index: 100;
@@ -109,7 +111,7 @@ a:hover { text-decoration: underline; }
     display: flex;
     align-items: center;
     padding: 0 1rem;
-    height: 52px;
+    height: 100%;
     gap: 1rem;
 }
 
@@ -256,7 +258,7 @@ a:hover { text-decoration: underline; }
     border-bottom: 1px solid var(--border-color);
     box-shadow: var(--shadow-sm);
     position: sticky;
-    top: 52px;
+    top: var(--top-bar-height);
     z-index: 90;
 }
 
