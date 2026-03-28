@@ -54,7 +54,7 @@ class Actions {
                 // Re-entry: reset season-bound state, keep participation_time_total
                 $db->query(
                     "UPDATE season_participation SET 
-                     coins = 0, seasonal_stars = 0,
+                     coins = 0, coins_fractional_fp = 0, seasonal_stars = 0,
                      sigils_t1 = 0, sigils_t2 = 0, sigils_t3 = 0, sigils_t4 = 0, sigils_t5 = 0,
                      participation_ticks_since_join = 0, spend_window_total = 0,
                      active_boosts = NULL
@@ -305,7 +305,7 @@ class Actions {
             // 3. Destroy all season-bound resources
             $db->query(
                 "UPDATE season_participation SET 
-                 coins = 0, seasonal_stars = 0,
+                 coins = 0, coins_fractional_fp = 0, seasonal_stars = 0,
                  sigils_t1 = 0, sigils_t2 = 0, sigils_t3 = 0, sigils_t4 = 0, sigils_t5 = 0,
                  active_boosts = NULL
                  WHERE player_id = ? AND season_id = ?",

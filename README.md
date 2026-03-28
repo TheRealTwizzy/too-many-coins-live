@@ -34,7 +34,7 @@ Too Many Coins is a season-based multiplayer economic strategy game. Players joi
 
 ## Sigil Drop System
 
-- **Base Rate**: 1 in 833 per eligible tick (1-minute ticks)
+- **Base Rate**: 1 in 750 per eligible tick (1-minute ticks)
 - **Eligibility**: Must be Online + Participating + Active (not Idle)
 - **Pity Timer**: Guaranteed Tier I drop after 2,000 eligible ticks with no drop
 - **Throttle**: Maximum 3 drops per rolling 1,440-tick window

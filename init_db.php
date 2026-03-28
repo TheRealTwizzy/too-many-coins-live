@@ -79,6 +79,17 @@ try {
         }
     }
 
+    try {
+        $pdo->exec("ALTER TABLE season_participation ADD COLUMN coins_fractional_fp BIGINT NOT NULL DEFAULT 0");
+        $results[] = 'Added coins_fractional_fp column';
+    } catch (PDOException $e) {
+        if (strpos($e->getMessage(), 'Duplicate column') === false) {
+            $results[] = 'coins_fractional_fp: ' . $e->getMessage();
+        } else {
+            $results[] = 'coins_fractional_fp column already exists';
+        }
+    }
+
     // Verify
     $tables = $pdo->query("SHOW TABLES")->fetchAll(PDO::FETCH_COLUMN);
     $boostCount = $pdo->query("SELECT COUNT(*) FROM boost_catalog")->fetchColumn();

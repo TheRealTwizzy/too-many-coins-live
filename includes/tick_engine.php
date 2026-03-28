@@ -134,23 +134,19 @@ class TickEngine {
                 $selfBoosts = self::getActivePlayerBoosts($playerId, $seasonId, $gameTime);
                 $boostModFp = self::calculateBoostModifier($selfBoosts, $globalBoosts);
                 
-                $ubiPerTick = Economy::calculateUBI($season, $p, $p);
-                
-                // Apply boost modifier to UBI
-                if ($boostModFp > 0) {
-                    $boostedUbi = Economy::fpMultiply($ubiPerTick, FP_SCALE + $boostModFp);
-                    $ubiPerTick = max($ubiPerTick, $boostedUbi); // Boosts can only increase UBI
-                }
-                
-                $totalUbi = $ubiPerTick * $ticksToProcess;
-                
-                if ($totalUbi > 0) {
-                    $db->query(
-                        "UPDATE season_participation SET coins = coins + ? WHERE player_id = ? AND season_id = ?",
-                        [$totalUbi, $playerId, $seasonId]
-                    );
-                    $totalNewCoins += $totalUbi;
-                }
+                $baseUbi = Economy::calculateUBI($season, $p, $p);
+                $ratePerTickFp = Economy::toFixedPoint($baseUbi);
+                $ratePerTickFp = Economy::applyBoostModifierFp($ratePerTickFp, $boostModFp);
+
+                $carryFp = max(0, (int)($p['coins_fractional_fp'] ?? 0));
+                $totalUbiFp = ($ratePerTickFp * $ticksToProcess) + $carryFp;
+                [$totalUbi, $newCarryFp] = Economy::splitFixedPoint($totalUbiFp);
+
+                $db->query(
+                    "UPDATE season_participation SET coins = coins + ?, coins_fractional_fp = ? WHERE player_id = ? AND season_id = ?",
+                    [$totalUbi, $newCarryFp, $playerId, $seasonId]
+                );
+                $totalNewCoins += $totalUbi;
                 
                 // Update participation tracking
                 $activeTicks = ($p['activity_state'] === 'Active') ? $ticksToProcess : 0;
@@ -250,54 +246,32 @@ class TickEngine {
             return;
         }
         
-        // Process drops over the batch of ticks
-        // For efficiency, we simulate the batch probabilistically
+        // Process drops over every eligible tick in the batch.
+        // This avoids sampling misses and keeps pity progression accurate.
         $dropsAwarded = 0;
         $maxNewDrops = SIGIL_MAX_DROPS_WINDOW - $dropsInWindow;
-        
-        // Check pity first
-        $newPityCounter = $pityCounter + $ticksToProcess;
-        
-        if ($newPityCounter >= SIGIL_PITY_TICKS && $dropsAwarded < $maxNewDrops) {
-            // Pity drop: forced Tier I
-            self::awardSigilDrop($playerId, $seasonId, 1, $gameTime, 'PITY');
-            $dropsAwarded++;
-            $newPityCounter = 0;
+        if ($maxNewDrops <= 0) {
+            return;
         }
         
-        // RNG drops: for each tick in the batch, run Bernoulli trial
-        // For large batches, use expected value + variance approach
-        if ($ticksToProcess <= 100 && $dropsAwarded < $maxNewDrops) {
-            // Small batch: simulate each tick
-            for ($t = 0; $t < $ticksToProcess && $dropsAwarded < $maxNewDrops; $t++) {
-                $tickIndex = $lastSeasonTick + $t;
-                $absoluteTick = $startTime + $tickIndex;
-                
-                $tier = Economy::processSigilDrop($season, $playerId, $absoluteTick);
-                if ($tier > 0) {
-                    self::awardSigilDrop($playerId, $seasonId, $tier, $absoluteTick, 'RNG');
-                    $dropsAwarded++;
-                    $newPityCounter = 0;
-                }
+        $newPityCounter = $pityCounter;
+        for ($t = 0; $t < $ticksToProcess && $dropsAwarded < $maxNewDrops; $t++) {
+            $tickIndex = $lastSeasonTick + $t;
+            $absoluteTick = $startTime + $tickIndex;
+
+            $newPityCounter++;
+            if ($newPityCounter >= SIGIL_PITY_TICKS) {
+                self::awardSigilDrop($playerId, $seasonId, 1, $absoluteTick, 'PITY');
+                $dropsAwarded++;
+                $newPityCounter = 0;
+                continue;
             }
-        } else if ($dropsAwarded < $maxNewDrops) {
-            // Large batch: use probabilistic sampling
-            // Expected drops = ticksToProcess / SIGIL_DROP_RATE
-            // For very large batches, sample a few representative ticks
-            $sampleCount = min($ticksToProcess, 500);
-            $sampleInterval = max(1, intdiv($ticksToProcess, $sampleCount));
-            
-            for ($i = 0; $i < $sampleCount && $dropsAwarded < $maxNewDrops; $i++) {
-                $tickIndex = $lastSeasonTick + ($i * $sampleInterval);
-                $absoluteTick = $startTime + $tickIndex;
-                
-                // Scale probability for the interval
-                $tier = Economy::processSigilDrop($season, $playerId, $absoluteTick);
-                if ($tier > 0) {
-                    self::awardSigilDrop($playerId, $seasonId, $tier, $absoluteTick, 'RNG');
-                    $dropsAwarded++;
-                    $newPityCounter = 0;
-                }
+
+            $tier = Economy::processSigilDrop($season, $playerId, $absoluteTick);
+            if ($tier > 0) {
+                self::awardSigilDrop($playerId, $seasonId, $tier, $absoluteTick, 'RNG');
+                $dropsAwarded++;
+                $newPityCounter = 0;
             }
         }
         

@@ -731,7 +731,7 @@ const TMC = {
                                 <div class="sigil-item tier-${i+1}">
                                     <span class="sigil-tier">T${i+1}</span>
                                     <span class="sigil-count">${count}</span>
-                                    <span class="sigil-rate">Drop: ${(sigilRateByTier[i + 1] || 0).toFixed(2)}%</span>
+                                    <span class="sigil-rate">${this.formatPercentCompact(sigilRateByTier[i + 1] || 0)}%</span>
                                 </div>
                             `).join('')}
                         </div>
@@ -775,16 +775,6 @@ const TMC = {
                             ${!p.can_lock_in || isBlackout ? 'disabled' : ''}>
                             Lock-In (${this.formatNumber(part.seasonal_stars)} Stars)
                         </button>
-                    </div>
-
-                    <!-- Trade Panel -->
-                    <div class="action-panel">
-                        <h3>Trading</h3>
-                        <p class="panel-info">Trade Coins and Sigils with other players in this season.</p>
-                        <button class="btn btn-primary" onclick="TMC.navigate('trade', ${seasonId})" ${isBlackout ? 'disabled' : ''}>
-                            Open Trade Center
-                        </button>
-                        <div id="my-trades-list" class="trades-list"></div>
                     </div>
                 </div>
             `;
@@ -1837,6 +1827,18 @@ const TMC = {
     formatNumber(n) {
         if (n === null || n === undefined) return '0';
         return Number(n).toLocaleString();
+    },
+
+    formatPercentCompact(value) {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return '0';
+        if (num === 0) return '0';
+
+        if (num >= 1) {
+            return num.toFixed(2).replace(/\.00$/, '').replace(/(\.\d*[1-9])0+$/, '$1');
+        }
+
+        return num.toFixed(4).replace(/\.0+$/, '').replace(/(\.\d*[1-9])0+$/, '$1');
     },
 
     escapeHtml(str) {

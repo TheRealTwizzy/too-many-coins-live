@@ -116,6 +116,7 @@ CREATE TABLE IF NOT EXISTS season_participation (
     player_id BIGINT UNSIGNED NOT NULL,
     season_id BIGINT UNSIGNED NOT NULL,
     coins BIGINT NOT NULL DEFAULT 0,
+    coins_fractional_fp BIGINT NOT NULL DEFAULT 0,
     seasonal_stars BIGINT NOT NULL DEFAULT 0,
     -- Sigils by tier (1-5)
     sigils_t1 INT NOT NULL DEFAULT 0,

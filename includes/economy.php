@@ -16,6 +16,35 @@ class Economy {
         // PHP handles big integers natively (GMP-like for 64-bit)
         return intdiv($base * $multFp, FP_SCALE);
     }
+
+    /**
+     * Convert whole-coin value into fixed-point units.
+     */
+    public static function toFixedPoint($coins) {
+        return max(0, (int)$coins) * FP_SCALE;
+    }
+
+    /**
+     * Apply a boost modifier to a fixed-point amount.
+     */
+    public static function applyBoostModifierFp($amountFp, $boostModFp) {
+        $baseFp = max(0, (int)$amountFp);
+        $modFp = max(0, (int)$boostModFp);
+        if ($modFp <= 0) return $baseFp;
+
+        return intdiv($baseFp * (FP_SCALE + $modFp), FP_SCALE);
+    }
+
+    /**
+     * Split fixed-point amount into whole coins and residual fractional fp.
+     */
+    public static function splitFixedPoint($amountFp) {
+        $value = max(0, (int)$amountFp);
+        return [
+            intdiv($value, FP_SCALE),
+            $value % FP_SCALE,
+        ];
+    }
     
     /**
      * Clamp value between min and max
@@ -227,7 +256,7 @@ class Economy {
         
         // Use 'N' (unsigned 32-bit big-endian) for both extractions: portable across all
         // PHP platforms unlike 'P' (machine byte-order 64-bit). A 32-bit range
-        // (0–4,294,967,295) is far larger than SIGIL_DROP_RATE (833) and 1,000,000,
+        // (0–4,294,967,295) is far larger than SIGIL_DROP_RATE and 1,000,000,
         // so the modulo distribution is effectively uniform.
 
         // Bernoulli trial: bytes 0-3 mod SIGIL_DROP_RATE

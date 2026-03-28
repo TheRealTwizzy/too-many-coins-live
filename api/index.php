@@ -341,18 +341,22 @@ try {
 // ==================== HELPER FUNCTIONS ====================
 
 function getSigilDropRateMetadata() {
+    $basePercent = 100 / max(1, (int)SIGIL_DROP_RATE);
     $tiers = [];
     foreach (SIGIL_TIER_ODDS as $tier => $oddsFp) {
+        $conditionalPercent = ((int)$oddsFp / 1000000) * 100;
+        $effectivePercent = $basePercent * ((int)$oddsFp / 1000000);
         $tiers[] = [
             'tier' => (int)$tier,
             'odds_fp' => (int)$oddsFp,
-            'chance_percent' => round(((int)$oddsFp / 1000000) * 100, 2)
+            'chance_percent' => round($effectivePercent, 6),
+            'conditional_percent' => round($conditionalPercent, 2)
         ];
     }
 
     return [
         'base_one_in' => (int)SIGIL_DROP_RATE,
-        'base_percent' => round(100 / max(1, (int)SIGIL_DROP_RATE), 3),
+        'base_percent' => round($basePercent, 6),
         'tiers' => $tiers
     ];
 }
@@ -361,15 +365,13 @@ function calculatePlayerRatePerTick($season, $player, $participation, $activeBoo
     if (!$season || !$participation) return 0;
 
     $baseUbi = Economy::calculateUBI($season, $player, $participation);
-    $ratePerTick = max(0, (int)$baseUbi);
+    $ratePerTickFp = Economy::toFixedPoint($baseUbi);
     $totalModFp = (int)($activeBoosts['total_modifier_fp'] ?? 0);
 
-    if ($totalModFp > 0) {
-        $boostedUbi = Economy::fpMultiply($baseUbi, FP_SCALE + $totalModFp);
-        $ratePerTick = max($ratePerTick, $boostedUbi);
-    }
+    $ratePerTickFp = Economy::applyBoostModifierFp($ratePerTickFp, $totalModFp);
+    $ratePerTick = round($ratePerTickFp / FP_SCALE, 2);
 
-    return (int)$ratePerTick;
+    return max(0, $ratePerTick);
 }
 
 function getGameState($player) {
