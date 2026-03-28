@@ -758,6 +758,7 @@ function getActiveBoosts($player) {
     if (!$player['joined_season_id']) return ['self' => [], 'global' => []];
     
     $gameTime = GameTime::now();
+    $serverNowUnix = time();
     $seasonId = $player['joined_season_id'];
     
     $selfBoosts = $db->fetchAll(
@@ -779,6 +780,23 @@ function getActiveBoosts($player) {
         [$seasonId, $gameTime]
     );
     
+    // Annotate each boost with wall-clock expiry data for client-side real-time countdown.
+    // expires_at_real is an absolute Unix timestamp: the moment the boost expires in real time.
+    // remaining_real_seconds is the number of real seconds left at the time this response is built.
+    // Using absolute timestamps makes the countdown resilient to page refresh, disconnect, and idle.
+    foreach ($selfBoosts as &$b) {
+        $ticksRemaining = max(0, (int)$b['expires_tick'] - $gameTime);
+        $b['remaining_real_seconds'] = gameTicksToRealSeconds($ticksRemaining);
+        $b['expires_at_real'] = $serverNowUnix + $b['remaining_real_seconds'];
+    }
+    unset($b);
+    foreach ($globalBoosts as &$b) {
+        $ticksRemaining = max(0, (int)$b['expires_tick'] - $gameTime);
+        $b['remaining_real_seconds'] = gameTicksToRealSeconds($ticksRemaining);
+        $b['expires_at_real'] = $serverNowUnix + $b['remaining_real_seconds'];
+    }
+    unset($b);
+    
     // Calculate total modifier
     $totalModFp = 0;
     foreach ($selfBoosts as $b) $totalModFp += (int)$b['modifier_fp'];
@@ -790,7 +808,8 @@ function getActiveBoosts($player) {
         'global' => $globalBoosts,
         'total_modifier_fp' => $totalModFp,
         'total_modifier_percent' => round($totalModFp / 10000, 1),
-        'server_now' => $gameTime
+        'server_now' => $gameTime,
+        'server_real_now' => $serverNowUnix
     ];
 }
 

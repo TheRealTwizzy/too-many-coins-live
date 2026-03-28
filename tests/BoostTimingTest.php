@@ -12,6 +12,14 @@
  * gameTime T and only removed at gameTime T+1.
  *
  * 1 game tick = 1 minute of real time (TICK_REAL_SECONDS = 60, TIME_SCALE = 1).
+ *
+ * Follow-up fixes also addressed:
+ * - Boost state persists across page refresh / disconnect / idle because the
+ *   server stores expires_tick in the database and rehydrates on every request.
+ * - Each boost now carries an absolute wall-clock expiry (expires_at_real) so
+ *   the client can render an accurate real-time countdown without drifting.
+ * - Page routing is restored from localStorage on reload so players stay on
+ *   the same screen.
  */
 
 use PHPUnit\Framework\TestCase;
@@ -90,6 +98,89 @@ class BoostTimingLogic
         $applied = self::isActiveForTick($expiresTick, $isActive, $gameTime);
 
         return ['applied' => $applied, 'isActiveAfter' => $isActive];
+    }
+}
+
+/**
+ * Simulates the server-side boost-persistence and rehydration logic.
+ *
+ * The canonical model is:
+ *   - expires_tick is stored absolutely in the DB at purchase time.
+ *   - On every API read, remaining time is recomputed as max(0, expires_tick - now).
+ *   - disconnect / idle / refresh do NOT clear or modify expires_tick.
+ *
+ * This mirrors getActiveBoosts() in api/index.php.
+ */
+class BoostPersistenceLogic
+{
+    /**
+     * Simulate fetching active boosts for a player at a given game tick.
+     * Returns only boosts whose expires_tick >= gameTime (still valid).
+     *
+     * @param array[] $storedBoosts  Rows from active_boosts (keyed by id).
+     * @param int     $gameTime      Current game tick.
+     * @return array[] Active boost rows.
+     */
+    public static function fetchActiveBoosts(array $storedBoosts, int $gameTime): array
+    {
+        return array_values(array_filter(
+            $storedBoosts,
+            fn($b) => $b['is_active'] === true && $b['expires_tick'] >= $gameTime
+        ));
+    }
+
+    /**
+     * Compute the wall-clock remaining seconds for a boost.
+     * Mirrors: getActiveBoosts() in api/index.php.
+     *   $ticksRemaining = max(0, expires_tick - gameTime)
+     *   $remaining_real_seconds = gameTicksToRealSeconds($ticksRemaining)
+     *
+     * @param int $expiresTick   The boost's expires_tick.
+     * @param int $gameTime      Current game tick.
+     * @param int $tickRealSecs  Real seconds per game tick (default 60).
+     * @return int Remaining real seconds (non-negative).
+     */
+    public static function remainingRealSeconds(int $expiresTick, int $gameTime, int $tickRealSecs = 60): int
+    {
+        $ticksRemaining = max(0, $expiresTick - $gameTime);
+        return $ticksRemaining * $tickRealSecs;
+    }
+
+    /**
+     * Compute the absolute wall-clock Unix timestamp when a boost expires.
+     * Mirrors: $b['expires_at_real'] = $serverNowUnix + $remaining_real_seconds
+     *
+     * @param int $expiresTick   The boost's expires_tick.
+     * @param int $gameTime      Current game tick.
+     * @param int $serverNowUnix Server's current Unix timestamp.
+     * @param int $tickRealSecs  Real seconds per game tick (default 60).
+     * @return int Unix timestamp of expiry.
+     */
+    public static function expiresAtReal(int $expiresTick, int $gameTime, int $serverNowUnix, int $tickRealSecs = 60): int
+    {
+        return $serverNowUnix + self::remainingRealSeconds($expiresTick, $gameTime, $tickRealSecs);
+    }
+}
+
+/**
+ * Simulates the client-side countdown logic.
+ *
+ * The client receives expires_at_real (absolute Unix timestamp) and computes:
+ *   remaining = max(0, expires_at_real - clientNow)
+ * This never goes negative and is independent of tick processing.
+ */
+class BoostCountdownLogic
+{
+    /**
+     * Compute client-side remaining seconds from the absolute expiry timestamp.
+     *
+     * @param int $expiresAtReal  Unix timestamp when the boost expires.
+     * @param int $clientNow      Current Unix timestamp on the client.
+     * @return int Non-negative remaining seconds.
+     */
+    public static function remainingSeconds(int $expiresAtReal, int $clientNow): int
+    {
+        return max(0, $expiresAtReal - $clientNow);
     }
 }
 
@@ -348,5 +439,157 @@ class BoostTimingTest extends TestCase
             $oldApplied,
             'Regression guard: old expires_tick <= / > conditions must NOT apply the boost at T+1, confirming the bug existed.'
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Boost persistence: refresh, disconnect, and idle scenarios
+    // -----------------------------------------------------------------------
+
+    /**
+     * Simulates a page refresh: the client reconnects and the server re-reads
+     * the boost from the database.  Because expires_tick is persisted and the
+     * game clock has not reached it, the boost must still be returned as active.
+     *
+     * This mirrors getActiveBoosts() querying "WHERE is_active = 1 AND expires_tick >= gameTime".
+     */
+    public function testBoostSurvivesPageRefresh(): void
+    {
+        // Boost was purchased at tick 500, duration 60 → expires at tick 560
+        $storedBoost = ['id' => 1, 'expires_tick' => 560, 'is_active' => true];
+
+        // Player refreshes at tick 520 (40 ticks into the boost's lifetime)
+        $gameTimeAfterRefresh = 520;
+        $active = BoostPersistenceLogic::fetchActiveBoosts([$storedBoost], $gameTimeAfterRefresh);
+
+        $this->assertCount(1, $active, 'Boost must still be returned as active after a page refresh mid-duration.');
+        $this->assertSame(560, $active[0]['expires_tick']);
+    }
+
+    /**
+     * Simulates an idle / disconnect period: no ticks are processed for 30
+     * ticks (e.g., the worker is paused or the player goes offline).  The boost
+     * must still be active when the player reconnects, because expires_tick in
+     * the database is unchanged.
+     *
+     * This demonstrates that boost validity is NOT tied to active connection or
+     * continuous tick processing.
+     */
+    public function testBoostSurvivesDisconnectAndIdlePeriod(): void
+    {
+        // Boost expires at tick 300; last tick processed was tick 200.
+        $storedBoost = ['id' => 2, 'expires_tick' => 300, 'is_active' => true];
+
+        // Gap: ticks 201–230 were skipped (worker paused / player offline).
+        // Player reconnects; server now processes tick 231.
+        $gameTimeAtReconnect = 231;
+        $active = BoostPersistenceLogic::fetchActiveBoosts([$storedBoost], $gameTimeAtReconnect);
+
+        $this->assertCount(1, $active, 'Boost must still be active after an idle/disconnect gap.');
+    }
+
+    /**
+     * Boost must NOT survive a disconnect that lasts past its expiry tick.
+     * At reconnect the server re-evaluates expires_tick >= gameTime and must
+     * not return an already-expired boost.
+     */
+    public function testExpiredBoostIsNotReturnedAfterReconnect(): void
+    {
+        $storedBoost = ['id' => 3, 'expires_tick' => 150, 'is_active' => true];
+
+        // Player reconnects at tick 151, one tick after expiry
+        $active = BoostPersistenceLogic::fetchActiveBoosts([$storedBoost], 151);
+
+        $this->assertCount(0, $active, 'A boost past its expires_tick must not be returned on reconnect.');
+    }
+
+    // -----------------------------------------------------------------------
+    // Wall-clock expiry and remaining_real_seconds computation
+    // -----------------------------------------------------------------------
+
+    /**
+     * Verify that remaining_real_seconds is computed correctly from the tick gap.
+     * 1 tick = 60 real seconds in production.
+     */
+    public function testRemainingRealSecondsCalculation(): void
+    {
+        // 10 ticks remaining × 60 s/tick = 600 seconds
+        $remaining = BoostPersistenceLogic::remainingRealSeconds(110, 100);
+        $this->assertSame(600, $remaining, 'remaining_real_seconds must equal ticksRemaining × TICK_REAL_SECONDS.');
+    }
+
+    /**
+     * remaining_real_seconds must be zero (never negative) once the boost has expired.
+     */
+    public function testRemainingRealSecondsIsNonNegativeWhenExpired(): void
+    {
+        $remaining = BoostPersistenceLogic::remainingRealSeconds(99, 100);
+        $this->assertSame(0, $remaining, 'remaining_real_seconds must be 0 for an already-expired boost, never negative.');
+    }
+
+    /**
+     * Verify that expires_at_real is an absolute Unix timestamp equal to
+     * serverNowUnix + remaining_real_seconds.
+     */
+    public function testExpiresAtRealIsAbsoluteTimestamp(): void
+    {
+        $serverNow  = 1_700_000_000; // arbitrary Unix timestamp
+        $gameTime   = 100;
+        $expiresTick = 110; // 10 ticks away → 600 real seconds
+
+        $expiresAt = BoostPersistenceLogic::expiresAtReal($expiresTick, $gameTime, $serverNow);
+
+        $this->assertSame($serverNow + 600, $expiresAt,
+            'expires_at_real must be serverNowUnix + remaining_real_seconds.');
+    }
+
+    // -----------------------------------------------------------------------
+    // Client-side countdown logic (BoostCountdownLogic)
+    // -----------------------------------------------------------------------
+
+    /**
+     * The client countdown must count down toward zero as wall-clock time advances.
+     */
+    public function testCountdownDecreaseOverTime(): void
+    {
+        $expiresAtReal = 1_700_001_000; // 1000 seconds from base
+
+        $remainingAt0   = BoostCountdownLogic::remainingSeconds($expiresAtReal, 1_700_000_000);
+        $remainingAt500 = BoostCountdownLogic::remainingSeconds($expiresAtReal, 1_700_000_500);
+        $remainingAt999 = BoostCountdownLogic::remainingSeconds($expiresAtReal, 1_700_000_999);
+
+        $this->assertSame(1000, $remainingAt0,   'Countdown must show 1000s at start.');
+        $this->assertSame(500,  $remainingAt500, 'Countdown must show 500s at halfway.');
+        $this->assertSame(1,    $remainingAt999, 'Countdown must show 1s one second before expiry.');
+    }
+
+    /**
+     * The countdown must reach exactly zero at the expiry moment and never
+     * go negative.
+     */
+    public function testCountdownReachesZeroAtExpiryWithoutGoingNegative(): void
+    {
+        $expiresAtReal = 1_700_001_000;
+
+        $atExpiry      = BoostCountdownLogic::remainingSeconds($expiresAtReal, 1_700_001_000);
+        $afterExpiry   = BoostCountdownLogic::remainingSeconds($expiresAtReal, 1_700_002_000);
+
+        $this->assertSame(0, $atExpiry,    'Countdown must be exactly 0 at the expiry timestamp.');
+        $this->assertSame(0, $afterExpiry, 'Countdown must remain 0 (not negative) after the expiry timestamp.');
+    }
+
+    /**
+     * Boost expires only when the wall-clock reaches expiresAtReal, not before.
+     */
+    public function testBoostExpiredOnlyWhenWallClockReachesExpiresAtReal(): void
+    {
+        $expiresAtReal = 1_700_001_000;
+
+        $oneSecondBefore = BoostCountdownLogic::remainingSeconds($expiresAtReal, 1_700_000_999);
+        $atExpiry        = BoostCountdownLogic::remainingSeconds($expiresAtReal, 1_700_001_000);
+
+        $this->assertGreaterThan(0, $oneSecondBefore,
+            'Boost must still have remaining time one second before expiresAtReal.');
+        $this->assertSame(0, $atExpiry,
+            'Boost must have zero remaining time exactly at expiresAtReal.');
     }
 }

@@ -18,6 +18,7 @@ const TMC = {
         shopFilter: 'all',
         cosmetics: [],
         myCosmetics: [],
+        boostCountdowns: {},
     },
 
     API_BASE: '/api/index.php',
@@ -56,7 +57,15 @@ const TMC = {
 
         await this.refreshGameState();
         this.renderUserArea();
-        this.navigate('home');
+
+        // Restore the last-visited route on refresh; fall back to home if
+        // the player is not logged in or the saved screen was the auth page.
+        const savedRoute = this._loadRoute();
+        if (savedRoute && savedRoute.screen && savedRoute.screen !== 'auth' && this.state.player) {
+            this.navigate(savedRoute.screen, savedRoute.data !== undefined ? savedRoute.data : null);
+        } else {
+            this.navigate('home');
+        }
 
         // Start polling
         this.startPolling();
@@ -80,6 +89,7 @@ const TMC = {
         this.state.seasons = gs.seasons || [];
         this.syncSeasonCountdowns(this.state.seasons);
         this.state.player = gs.player || null;
+        this.syncBoostCountdowns();
         this.renderUserArea();
 
         if (this.state.currentScreen === 'auth' && this.state.player) {
@@ -123,6 +133,7 @@ const TMC = {
             };
         }
         this.renderUserArea();
+        localStorage.removeItem('tmc_route');
         this.navigate('home');
     },
 
@@ -152,12 +163,14 @@ const TMC = {
             };
         }
         this.renderUserArea();
+        localStorage.removeItem('tmc_route');
         this.navigate('home');
     },
 
     async logout() {
         await this.api('logout');
         localStorage.removeItem('tmc_token');
+        localStorage.removeItem('tmc_route');
         document.cookie = 'tmc_session=; path=/; max-age=0';
         this.state.player = null;
         this.state.gameState = null;
@@ -168,6 +181,7 @@ const TMC = {
 
     handleLoggedOut() {
         localStorage.removeItem('tmc_token');
+        localStorage.removeItem('tmc_route');
         this.state.player = null;
         this.renderUserArea();
     },
@@ -188,6 +202,7 @@ const TMC = {
     // ==================== NAVIGATION ====================
     navigate(screen, data) {
         this.state.currentScreen = screen;
+        this._saveRoute(screen, data);
 
         // Hide all screens
         document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -239,6 +254,71 @@ const TMC = {
                 this.renderTradeScreen(data);
                 break;
         }
+    },
+
+    // ==================== ROUTE PERSISTENCE ====================
+    // Save the current route to localStorage so page refresh returns the
+    // player to the same screen they were on.  The 'auth' screen is never
+    // persisted – on refresh an unauthenticated visitor always sees home.
+    _saveRoute(screen, data) {
+        if (screen === 'auth') {
+            try { localStorage.removeItem('tmc_route'); } catch (e) {}
+            return;
+        }
+        try {
+            localStorage.setItem('tmc_route', JSON.stringify({ screen, data: data !== undefined ? data : null }));
+        } catch (e) {}
+    },
+
+    _loadRoute() {
+        try {
+            const raw = localStorage.getItem('tmc_route');
+            return raw ? JSON.parse(raw) : null;
+        } catch (e) { return null; }
+    },
+
+    // ==================== BOOST COUNTDOWNS ====================
+    // Sync active-boost countdowns using the absolute wall-clock expiry
+    // timestamp (expires_at_real) returned by the server.  This allows the
+    // client to compute accurate remaining time at any point, including after
+    // a page refresh or idle/reconnect period.
+    syncBoostCountdowns() {
+        const p = this.state.player;
+        if (!p || !p.active_boosts) { this.state.boostCountdowns = {}; return; }
+        const allBoosts = [...(p.active_boosts.self || []), ...(p.active_boosts.global || [])];
+        allBoosts.forEach(b => {
+            const key = b.id !== undefined ? b.id : b.boost_id;
+            if (key === undefined || key === null) return;
+            this.state.boostCountdowns[key] = {
+                expiresAtReal: parseInt(b.expires_at_real) || 0
+            };
+        });
+    },
+
+    // Compute live remaining seconds for a boost using the authoritative
+    // wall-clock expiry timestamp.  Returns 0 (never negative) once expired.
+    getLiveBoostRemainingSeconds(boost) {
+        const key = boost.id !== undefined ? boost.id : boost.boost_id;
+        const entry = key !== undefined ? this.state.boostCountdowns[key] : null;
+        const expiresAtReal = entry ? entry.expiresAtReal
+            : (parseInt(boost.expires_at_real) || 0);
+        if (!expiresAtReal) return 0;
+        return Math.max(0, expiresAtReal - Math.floor(Date.now() / 1000));
+    },
+
+    // Called every second by the realtime interval to update boost remaining-
+    // time labels without a full re-render.
+    _tickBoostCountdowns() {
+        const p = this.state.player;
+        if (!p || !p.active_boosts) return;
+        const allBoosts = [...(p.active_boosts.self || []), ...(p.active_boosts.global || [])];
+        allBoosts.forEach(b => {
+            const key = b.id !== undefined ? b.id : b.boost_id;
+            const el = document.querySelector(`.active-boost-item[data-boost-id="${key}"] .ab-time`);
+            if (!el) return;
+            const secs = this.getLiveBoostRemainingSeconds(b);
+            el.textContent = secs > 0 ? this.formatSecondsRemaining(secs) : 'Expiring\u2026';
+        });
     },
 
     // ==================== RENDER: USER AREA ====================
@@ -334,6 +414,7 @@ const TMC = {
             if (season && timerValue) {
                 timerValue.textContent = this.getSeasonTimerText(season);
             }
+            this._tickBoostCountdowns();
         }
     },
 
@@ -541,6 +622,9 @@ const TMC = {
         if (lockInBtn) {
             lockInBtn.textContent = `Lock-In (${this.formatNumber(p.participation.seasonal_stars)} Stars)`;
         }
+
+        // Re-render the active boosts panel with fresh data from the latest poll
+        this.renderActiveBoosts();
 
         // Refresh leaderboard
         this.loadSeasonLeaderboard(seasonId);
@@ -1060,20 +1144,20 @@ const TMC = {
             return;
         }
 
-        const gameTime = boosts.server_now || 0;
         let html = `<div class="active-boosts-summary">
             <span class="boost-total-mod">Total UBI Modifier: <strong>+${boosts.total_modifier_percent}%</strong></span>
         </div>`;
 
         const renderBoost = (b, type) => {
-            const remaining = Math.max(0, parseInt(b.expires_tick) - gameTime);
+            const remainingSeconds = this.getLiveBoostRemainingSeconds(b);
             const modPercent = (parseInt(b.modifier_fp) / 10000).toFixed(1);
-            const timeLeft = this.formatBoostDuration(remaining, 'short');
+            const timeLeft = remainingSeconds > 0 ? this.formatSecondsRemaining(remainingSeconds) : 'Expiring\u2026';
             const displayName = this.getBoostDisplayName(b.name);
-            return `<div class="active-boost-item ${type}">
+            const boostKey = b.id !== undefined ? b.id : b.boost_id;
+            return `<div class="active-boost-item ${type}" data-boost-id="${boostKey}">
                 <span class="ab-name">${this.escapeHtml(displayName)}</span>
                 <span class="ab-mod">+${modPercent}%</span>
-                <span class="ab-time">${timeLeft} left</span>
+                <span class="ab-time">${timeLeft}</span>
                 ${type === 'global' ? `<span class="ab-by">by ${this.escapeHtml(b.activator_handle || '')}</span>` : ''}
             </div>`;
         };
