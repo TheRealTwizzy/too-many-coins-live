@@ -282,12 +282,17 @@ const TMC = {
     // timestamp (expires_at_real) returned by the server.  This allows the
     // client to compute accurate remaining time at any point, including after
     // a page refresh or idle/reconnect period.
+
+    _getBoostKey(boost) {
+        return boost.id !== undefined ? boost.id : boost.boost_id;
+    },
+
     syncBoostCountdowns() {
         const p = this.state.player;
         if (!p || !p.active_boosts) { this.state.boostCountdowns = {}; return; }
         const allBoosts = [...(p.active_boosts.self || []), ...(p.active_boosts.global || [])];
         allBoosts.forEach(b => {
-            const key = b.id !== undefined ? b.id : b.boost_id;
+            const key = this._getBoostKey(b);
             if (key === undefined || key === null) return;
             this.state.boostCountdowns[key] = {
                 expiresAtReal: parseInt(b.expires_at_real) || 0
@@ -298,12 +303,16 @@ const TMC = {
     // Compute live remaining seconds for a boost using the authoritative
     // wall-clock expiry timestamp.  Returns 0 (never negative) once expired.
     getLiveBoostRemainingSeconds(boost) {
-        const key = boost.id !== undefined ? boost.id : boost.boost_id;
+        const key = this._getBoostKey(boost);
         const entry = key !== undefined ? this.state.boostCountdowns[key] : null;
         const expiresAtReal = entry ? entry.expiresAtReal
             : (parseInt(boost.expires_at_real) || 0);
         if (!expiresAtReal) return 0;
         return Math.max(0, expiresAtReal - Math.floor(Date.now() / 1000));
+    },
+
+    _formatBoostTimeLeft(remainingSeconds) {
+        return remainingSeconds > 0 ? this.formatSecondsRemaining(remainingSeconds) : 'Expiring\u2026';
     },
 
     // Called every second by the realtime interval to update boost remaining-
@@ -313,11 +322,10 @@ const TMC = {
         if (!p || !p.active_boosts) return;
         const allBoosts = [...(p.active_boosts.self || []), ...(p.active_boosts.global || [])];
         allBoosts.forEach(b => {
-            const key = b.id !== undefined ? b.id : b.boost_id;
+            const key = this._getBoostKey(b);
             const el = document.querySelector(`.active-boost-item[data-boost-id="${key}"] .ab-time`);
             if (!el) return;
-            const secs = this.getLiveBoostRemainingSeconds(b);
-            el.textContent = secs > 0 ? this.formatSecondsRemaining(secs) : 'Expiring\u2026';
+            el.textContent = this._formatBoostTimeLeft(this.getLiveBoostRemainingSeconds(b));
         });
     },
 
@@ -1151,9 +1159,9 @@ const TMC = {
         const renderBoost = (b, type) => {
             const remainingSeconds = this.getLiveBoostRemainingSeconds(b);
             const modPercent = (parseInt(b.modifier_fp) / 10000).toFixed(1);
-            const timeLeft = remainingSeconds > 0 ? this.formatSecondsRemaining(remainingSeconds) : 'Expiring\u2026';
+            const timeLeft = this._formatBoostTimeLeft(remainingSeconds);
             const displayName = this.getBoostDisplayName(b.name);
-            const boostKey = b.id !== undefined ? b.id : b.boost_id;
+            const boostKey = this._getBoostKey(b);
             return `<div class="active-boost-item ${type}" data-boost-id="${boostKey}">
                 <span class="ab-name">${this.escapeHtml(displayName)}</span>
                 <span class="ab-mod">+${modPercent}%</span>
