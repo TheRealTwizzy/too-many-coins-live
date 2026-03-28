@@ -100,6 +100,17 @@ class Notifications {
         return $stmt->rowCount();
     }
 
+    public static function markAllRead($playerId) {
+        $db = Database::getInstance();
+        $stmt = $db->query(
+            "UPDATE player_notifications
+             SET is_read = 1, read_at = COALESCE(read_at, NOW())
+             WHERE player_id = ? AND removed_at IS NULL AND is_read = 0",
+            [(int)$playerId]
+        );
+        return $stmt->rowCount();
+    }
+
     public static function remove($playerId, $notificationIds) {
         $ids = self::sanitizeIds($notificationIds);
         if (count($ids) === 0) return 0;

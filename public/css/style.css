@@ -628,6 +628,19 @@ a:hover { text-decoration: underline; }
 .badge-declined { background: rgba(239,68,68,0.15); color: var(--accent-red); }
 .badge-canceled { background: rgba(107,115,148,0.15); color: var(--text-muted); }
 
+/* ==================== STATUS DOT ==================== */
+.status-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.status-dot-active    { background: var(--accent-green); }
+.status-dot-locked-in { background: var(--accent-purple); }
+.status-dot-idle      { background: var(--accent-orange); }
+.status-dot-offline   { background: var(--text-muted); }
+
 /* ==================== SEASON DETAIL ==================== */
 .season-header {
     display: flex;
@@ -928,7 +941,7 @@ a:hover { text-decoration: underline; }
 }
 
 .leaderboard-table th {
-    padding: 0.6rem 0.75rem;
+    padding: 0.6rem 0.5rem;
     text-align: left;
     font-size: 0.65rem;
     text-transform: uppercase;
@@ -939,7 +952,7 @@ a:hover { text-decoration: underline; }
 }
 
 .leaderboard-table td {
-    padding: 0.55rem 0.75rem;
+    padding: 0.55rem 0.5rem;
     border-bottom: 1px solid rgba(42,53,80,0.5);
     font-size: 0.82rem;
 }
@@ -957,7 +970,7 @@ a:hover { text-decoration: underline; }
 .rank-cell {
     font-family: var(--font-mono);
     font-weight: 700;
-    width: 50px;
+    width: 36px;
 }
 
 .stars-cell {
