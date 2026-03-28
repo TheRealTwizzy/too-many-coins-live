@@ -1,3 +1,10 @@
+# Dependencies
+vendor/
+composer.lock
+
+# PHPUnit cache
+.phpunit.result.cache
+
 # Test files
 test_*.txt
 ui_test_*.txt

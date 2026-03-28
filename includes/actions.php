@@ -784,14 +784,14 @@ class Actions {
         if ($scope === 'SELF') {
             $activeCount = $db->fetch(
                 "SELECT COUNT(*) as cnt FROM active_boosts 
-                 WHERE player_id = ? AND season_id = ? AND boost_id = ? AND is_active = 1 AND expires_tick > ?",
+                 WHERE player_id = ? AND season_id = ? AND boost_id = ? AND is_active = 1 AND expires_tick >= ?",
                 [$playerId, $seasonId, $boostId, $gameTime]
             )['cnt'];
         } else {
             // For GLOBAL boosts, check if this player already has one active
             $activeCount = $db->fetch(
                 "SELECT COUNT(*) as cnt FROM active_boosts 
-                 WHERE player_id = ? AND season_id = ? AND boost_id = ? AND is_active = 1 AND expires_tick > ?",
+                 WHERE player_id = ? AND season_id = ? AND boost_id = ? AND is_active = 1 AND expires_tick >= ?",
                 [$playerId, $seasonId, $boostId, $gameTime]
             )['cnt'];
         }

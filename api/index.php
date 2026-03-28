@@ -764,7 +764,7 @@ function getActiveBoosts($player) {
         "SELECT ab.*, bc.name, bc.description, bc.tier_required, bc.icon
          FROM active_boosts ab
          JOIN boost_catalog bc ON bc.boost_id = ab.boost_id
-         WHERE ab.player_id = ? AND ab.season_id = ? AND ab.is_active = 1 AND ab.scope = 'SELF' AND ab.expires_tick > ?
+         WHERE ab.player_id = ? AND ab.season_id = ? AND ab.is_active = 1 AND ab.scope = 'SELF' AND ab.expires_tick >= ?
          ORDER BY ab.expires_tick ASC",
         [$player['player_id'], $seasonId, $gameTime]
     );
@@ -774,7 +774,7 @@ function getActiveBoosts($player) {
          FROM active_boosts ab
          JOIN boost_catalog bc ON bc.boost_id = ab.boost_id
          JOIN players p ON p.player_id = ab.player_id
-         WHERE ab.season_id = ? AND ab.is_active = 1 AND ab.scope = 'GLOBAL' AND ab.expires_tick > ?
+         WHERE ab.season_id = ? AND ab.is_active = 1 AND ab.scope = 'GLOBAL' AND ab.expires_tick >= ?
          ORDER BY ab.expires_tick ASC",
         [$seasonId, $gameTime]
     );

@@ -344,7 +344,7 @@ class TickEngine {
         $db = Database::getInstance();
         $db->query(
             "UPDATE active_boosts SET is_active = 0 
-             WHERE season_id = ? AND is_active = 1 AND expires_tick <= ?",
+             WHERE season_id = ? AND is_active = 1 AND expires_tick < ?",
             [$seasonId, $gameTime]
         );
     }
@@ -358,7 +358,7 @@ class TickEngine {
             "SELECT ab.*, bc.name, bc.modifier_fp as catalog_modifier_fp
              FROM active_boosts ab
              JOIN boost_catalog bc ON bc.boost_id = ab.boost_id
-             WHERE ab.season_id = ? AND ab.is_active = 1 AND ab.scope = 'GLOBAL' AND ab.expires_tick > ?",
+             WHERE ab.season_id = ? AND ab.is_active = 1 AND ab.scope = 'GLOBAL' AND ab.expires_tick >= ?",
             [$seasonId, $gameTime]
         );
     }
@@ -372,7 +372,7 @@ class TickEngine {
             "SELECT ab.*, bc.name, bc.modifier_fp as catalog_modifier_fp
              FROM active_boosts ab
              JOIN boost_catalog bc ON bc.boost_id = ab.boost_id
-             WHERE ab.player_id = ? AND ab.season_id = ? AND ab.is_active = 1 AND ab.scope = 'SELF' AND ab.expires_tick > ?",
+             WHERE ab.player_id = ? AND ab.season_id = ? AND ab.is_active = 1 AND ab.scope = 'SELF' AND ab.expires_tick >= ?",
             [$playerId, $seasonId, $gameTime]
         );
     }
