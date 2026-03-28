@@ -17,6 +17,7 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/database.php';
 require_once __DIR__ . '/game_time.php';
 require_once __DIR__ . '/economy.php';
+require_once __DIR__ . '/boost_catalog.php';
 
 class TickEngine {
     
@@ -355,7 +356,7 @@ class TickEngine {
     private static function getActiveGlobalBoosts($seasonId, $gameTime) {
         $db = Database::getInstance();
         return $db->fetchAll(
-            "SELECT ab.*, bc.name, bc.modifier_fp as catalog_modifier_fp
+            "SELECT ab.*, bc.name, bc.tier_required, bc.modifier_fp as catalog_modifier_fp
              FROM active_boosts ab
              JOIN boost_catalog bc ON bc.boost_id = ab.boost_id
              WHERE ab.season_id = ? AND ab.is_active = 1 AND ab.scope = 'GLOBAL' AND ab.expires_tick >= ?",
@@ -369,7 +370,7 @@ class TickEngine {
     private static function getActivePlayerBoosts($playerId, $seasonId, $gameTime) {
         $db = Database::getInstance();
         return $db->fetchAll(
-            "SELECT ab.*, bc.name, bc.modifier_fp as catalog_modifier_fp
+            "SELECT ab.*, bc.name, bc.tier_required, bc.modifier_fp as catalog_modifier_fp
              FROM active_boosts ab
              JOIN boost_catalog bc ON bc.boost_id = ab.boost_id
              WHERE ab.player_id = ? AND ab.season_id = ? AND ab.is_active = 1 AND ab.scope = 'SELF' AND ab.expires_tick >= ?",
@@ -385,9 +386,11 @@ class TickEngine {
         $totalMod = 0;
         
         foreach ($selfBoosts as $b) {
+            $b = BoostCatalog::normalize($b);
             $totalMod += (int)$b['modifier_fp'];
         }
         foreach ($globalBoosts as $b) {
+            $b = BoostCatalog::normalize($b);
             $totalMod += (int)$b['modifier_fp'];
         }
         

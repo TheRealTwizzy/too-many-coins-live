@@ -76,13 +76,13 @@ CREATE TABLE IF NOT EXISTS sigil_drop_log (
 -- ============================================================
 
 INSERT INTO boost_catalog (name, description, tier_required, sigil_cost, scope, duration_ticks, modifier_id, modifier_fp, max_stack, icon) VALUES
--- Tier I: Minor self UBI boost
-('Coin Trickle', 'A gentle stream of extra coins flows your way. Increases your UBI by 10% for 1 minute.', 1, 1, 'SELF', 1, 1, 100000, 3, 'trickle'),
--- Tier II: Moderate self UBI boost
-('Coin Surge', 'A powerful surge of economic energy. Increases your UBI by 25% for 2 minutes.', 2, 1, 'SELF', 2, 2, 250000, 2, 'surge'),
--- Tier III: Strong self UBI boost
-('Golden Flow', 'Liquid gold courses through your economy. Increases your UBI by 50% for 3 minutes.', 3, 1, 'SELF', 3, 3, 500000, 1, 'golden'),
+-- Tier I: Self UBI boost
+('Trickle', 'Increases your UBI by 25% for 15 minutes.', 1, 1, 'SELF', 15, 1, 250000, 3, 'trickle'),
+-- Tier II: Self UBI boost
+('Surge', 'Increases your UBI by 50% for 30 minutes.', 2, 1, 'SELF', 30, 2, 500000, 2, 'surge'),
+-- Tier III: Self UBI boost
+('Flow', 'Increases your UBI by 75% for 1 hour.', 3, 1, 'SELF', 60, 3, 750000, 1, 'flow'),
 -- Tier IV: Global UBI boost (affects all participants)
-('Rising Tide', 'A rising tide lifts all boats. Increases UBI by 15% for ALL season participants for 1 hour.', 4, 1, 'GLOBAL', 60, 4, 150000, 1, 'tide'),
+('Tide', 'Increases UBI by 15% for all players for 24 hours.', 4, 1, 'GLOBAL', 1440, 4, 150000, 1, 'tide'),
 -- Tier V: Powerful global UBI boost
-('Golden Age', 'An era of unprecedented prosperity dawns. Increases UBI by 30% for ALL season participants for 2 hours.', 5, 1, 'GLOBAL', 120, 5, 300000, 1, 'age');
+('Age', 'Increases UBI by 30% for all players for 48 hours.', 5, 1, 'GLOBAL', 2880, 5, 300000, 1, 'age');

@@ -1,44 +1,67 @@
--- One-time hotfix: normalize legacy boost durations/descriptions in existing databases.
+-- One-time hotfix: align existing boost catalog with canonical production definitions.
 -- Safe to run multiple times (idempotent updates).
 -- Context: 1 tick = 1 minute.
--- - SELF boosts should be minute-scale (1/2/3 ticks).
--- - GLOBAL seasonal boosts remain hour-scale (60/120 ticks).
 
 START TRANSACTION;
 
--- Fix legacy self boosts that were previously seeded as 60/120/180 ticks (hours wording)
--- and normalize to minute-based canonical values.
+-- Tier I (SELF): Trickle, +25%, 15 minutes
 UPDATE boost_catalog
-SET
-    duration_ticks = CASE
-        WHEN duration_ticks = 60 THEN 1
-        WHEN duration_ticks = 120 THEN 2
-        WHEN duration_ticks = 180 THEN 3
-        ELSE duration_ticks
-    END,
-    description = CASE
-        WHEN description LIKE '%for 1 hour%' THEN REPLACE(description, 'for 1 hour', 'for 1 minute')
-        WHEN description LIKE '%for 2 hours%' THEN REPLACE(description, 'for 2 hours', 'for 2 minutes')
-        WHEN description LIKE '%for 3 hours%' THEN REPLACE(description, 'for 3 hours', 'for 3 minutes')
-        ELSE description
-    END
-WHERE
-    scope = 'SELF'
-    AND (
-        duration_ticks IN (60, 120, 180)
-        OR description LIKE '%for 1 hour%'
-        OR description LIKE '%for 2 hours%'
-        OR description LIKE '%for 3 hours%'
-    );
+SET name = 'Trickle',
+    description = 'Increases your UBI by 25% for 15 minutes.',
+    scope = 'SELF',
+    duration_ticks = 15,
+    modifier_fp = 250000,
+    max_stack = 3,
+    icon = 'trickle',
+    sigil_cost = 1
+WHERE tier_required = 1;
 
--- Ensure seasonal/global defaults are explicitly hour-scale as intended.
--- These updates are no-ops if already correct.
+-- Tier II (SELF): Surge, +50%, 30 minutes
 UPDATE boost_catalog
-SET duration_ticks = 60
-WHERE scope = 'GLOBAL' AND modifier_fp = 150000;
+SET name = 'Surge',
+    description = 'Increases your UBI by 50% for 30 minutes.',
+    scope = 'SELF',
+    duration_ticks = 30,
+    modifier_fp = 500000,
+    max_stack = 2,
+    icon = 'surge',
+    sigil_cost = 1
+WHERE tier_required = 2;
 
+-- Tier III (SELF): Flow, +75%, 1 hour
 UPDATE boost_catalog
-SET duration_ticks = 120
-WHERE scope = 'GLOBAL' AND modifier_fp = 300000;
+SET name = 'Flow',
+    description = 'Increases your UBI by 75% for 1 hour.',
+    scope = 'SELF',
+    duration_ticks = 60,
+    modifier_fp = 750000,
+    max_stack = 1,
+    icon = 'flow',
+    sigil_cost = 1
+WHERE tier_required = 3;
+
+-- Tier IV (GLOBAL): Tide, +15%, 24 hours
+UPDATE boost_catalog
+SET name = 'Tide',
+    description = 'Increases UBI by 15% for all players for 24 hours.',
+    scope = 'GLOBAL',
+    duration_ticks = 1440,
+    modifier_fp = 150000,
+    max_stack = 1,
+    icon = 'tide',
+    sigil_cost = 1
+WHERE tier_required = 4;
+
+-- Tier V (GLOBAL): Age, +30%, 48 hours
+UPDATE boost_catalog
+SET name = 'Age',
+    description = 'Increases UBI by 30% for all players for 48 hours.',
+    scope = 'GLOBAL',
+    duration_ticks = 2880,
+    modifier_fp = 300000,
+    max_stack = 1,
+    icon = 'age',
+    sigil_cost = 1
+WHERE tier_required = 5;
 
 COMMIT;

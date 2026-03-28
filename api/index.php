@@ -43,6 +43,7 @@ if ($rateData['count'] > $rateLimit) {
 require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/database.php';
 require_once __DIR__ . '/../includes/game_time.php';
+require_once __DIR__ . '/../includes/boost_catalog.php';
 require_once __DIR__ . '/../includes/economy.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/actions.php';
@@ -742,12 +743,7 @@ function getBoostCatalog() {
     $db = Database::getInstance();
     $catalog = $db->fetchAll("SELECT * FROM boost_catalog ORDER BY tier_required ASC, boost_id ASC");
     foreach ($catalog as &$boost) {
-        $durationTicks = (int)$boost['duration_ticks'];
-        // Backward compatibility: legacy self boosts were seeded at 60/120/180 ticks.
-        // Canonical minute-based self boosts use 1/2/3 ticks.
-        if ($boost['scope'] === 'SELF' && $durationTicks >= 60 && $durationTicks <= 180 && $durationTicks % 60 === 0) {
-            $boost['duration_ticks'] = intdiv($durationTicks, 60);
-        }
+        $boost = BoostCatalog::normalize($boost);
     }
     unset($boost);
     return $catalog;
@@ -788,12 +784,14 @@ function getActiveBoosts($player) {
     // between the purchase request and the subsequent active_boosts query.
     // remaining_real_seconds is derived from the same stable timestamp so it matches.
     foreach ($selfBoosts as &$b) {
+        $b = BoostCatalog::normalize($b);
         $expiresAtReal = GameTime::tickStartRealUnix((int)$b['expires_tick'] + 1);
         $b['expires_at_real'] = $expiresAtReal;
         $b['remaining_real_seconds'] = max(0, $expiresAtReal - $serverNowUnix);
     }
     unset($b);
     foreach ($globalBoosts as &$b) {
+        $b = BoostCatalog::normalize($b);
         $expiresAtReal = GameTime::tickStartRealUnix((int)$b['expires_tick'] + 1);
         $b['expires_at_real'] = $expiresAtReal;
         $b['remaining_real_seconds'] = max(0, $expiresAtReal - $serverNowUnix);

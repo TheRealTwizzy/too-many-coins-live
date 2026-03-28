@@ -26,11 +26,11 @@ Too Many Coins is a season-based multiplayer economic strategy game. Players joi
 
 | Boost | Tier | Effect | Duration | Scope |
 |-------|------|--------|----------|-------|
-| Coin Trickle | I | +10% UBI | 1 minute | Self |
-| Coin Surge | II | +25% UBI | 2 minutes | Self |
-| Golden Flow | III | +50% UBI | 3 minutes | Self |
-| Rising Tide | IV | +15% UBI | 1 hour | All Players |
-| Golden Age | V | +30% UBI | 2 hours | All Players |
+| Trickle | I | +25% UBI | 15 minutes | Self |
+| Surge | II | +50% UBI | 30 minutes | Self |
+| Flow | III | +75% UBI | 1 hour | Self |
+| Tide | IV | +15% UBI | 24 hours | All Players |
+| Age | V | +30% UBI | 48 hours | All Players |
 
 ## Sigil Drop System
 

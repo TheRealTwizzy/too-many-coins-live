@@ -8,6 +8,7 @@ require_once __DIR__ . '/database.php';
 require_once __DIR__ . '/game_time.php';
 require_once __DIR__ . '/economy.php';
 require_once __DIR__ . '/auth.php';
+require_once __DIR__ . '/boost_catalog.php';
 
 class Actions {
     
@@ -755,15 +756,11 @@ class Actions {
         $boost = $db->fetch("SELECT * FROM boost_catalog WHERE boost_id = ?", [$boostId]);
         if (!$boost) return ['error' => 'Boost not found'];
         
+        $boost = BoostCatalog::normalize($boost);
         $tierRequired = (int)$boost['tier_required'];
         $sigilCost = (int)$boost['sigil_cost'];
         $scope = $boost['scope'];
         $durationTicks = (int)$boost['duration_ticks'];
-        // Backward compatibility: legacy self boosts were seeded as 60/120/180 ticks.
-        // Canonical minute-based self boosts use 1/2/3 ticks.
-        if ($scope === 'SELF' && $durationTicks >= 60 && $durationTicks <= 180 && $durationTicks % 60 === 0) {
-            $durationTicks = intdiv($durationTicks, 60);
-        }
         $modifierFp = (int)$boost['modifier_fp'];
         $maxStack = (int)$boost['max_stack'];
         
