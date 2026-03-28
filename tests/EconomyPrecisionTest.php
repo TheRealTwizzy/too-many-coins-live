@@ -86,13 +86,13 @@ class EconomyPrecisionTest extends TestCase
     public function testVaultCostUsesTargetTierDefaultsForNaturalProgression(): void
     {
         $vaultConfig = json_encode([
-            ['tier' => 1, 'supply' => 500, 'cost_table' => [['remaining' => 1, 'cost' => 10]]],
-            ['tier' => 2, 'supply' => 250, 'cost_table' => [['remaining' => 1, 'cost' => 25]]],
+            ['tier' => 1, 'supply' => 500, 'cost_table' => [['remaining' => 1, 'cost' => 5]]],
+            ['tier' => 2, 'supply' => 250, 'cost_table' => [['remaining' => 1, 'cost' => 20]]],
             ['tier' => 3, 'supply' => 100, 'cost_table' => [['remaining' => 1, 'cost' => 50]]],
         ]);
 
-        $this->assertSame(10, Economy::calculateVaultCost($vaultConfig, 1, 500));
-        $this->assertSame(25, Economy::calculateVaultCost($vaultConfig, 2, 250));
+        $this->assertSame(5, Economy::calculateVaultCost($vaultConfig, 1, 500));
+        $this->assertSame(20, Economy::calculateVaultCost($vaultConfig, 2, 250));
         $this->assertSame(50, Economy::calculateVaultCost($vaultConfig, 3, 100));
     }
 

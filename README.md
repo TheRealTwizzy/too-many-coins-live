@@ -308,8 +308,8 @@ curl -sS -X POST "https://your-domain/api/index.php?action=tick" \
 
 | Tier | Supply | Cost | Description |
 |------|--------|------|-------------|
-| I | 2,500 | 10 stars | Common |
-| II | 1,000 | 25 stars | Uncommon |
+| I | 2,500 | 5 stars | Common |
+| II | 1,000 | 20 stars | Uncommon |
 | III | 500 | 50 stars | Rare |
 | IV | 250 | 100 stars | Epic |
 | V | 100 | 250 stars | Legendary |

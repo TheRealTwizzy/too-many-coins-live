@@ -166,8 +166,8 @@ class GameTime {
                 ]);
                 
                 $vaultConfig = json_encode([
-                    ['tier' => 1, 'supply' => 500, 'cost_table' => [['remaining' => 1, 'cost' => 10]]],
-                    ['tier' => 2, 'supply' => 250, 'cost_table' => [['remaining' => 1, 'cost' => 25]]],
+                    ['tier' => 1, 'supply' => 500, 'cost_table' => [['remaining' => 1, 'cost' => 5]]],
+                    ['tier' => 2, 'supply' => 250, 'cost_table' => [['remaining' => 1, 'cost' => 20]]],
                     ['tier' => 3, 'supply' => 100, 'cost_table' => [['remaining' => 1, 'cost' => 50]]]
                 ]);
                 
