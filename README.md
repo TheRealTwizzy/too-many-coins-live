@@ -89,25 +89,25 @@ too-many-coins/
 └── README.md                   # This file
 ```
 
-## Automatic DB Hotfixes
+## Automatic DB Migrations
 
-Runtime hotfix application is enabled by default:
+Runtime migration application is enabled by default and runs on redeploy/startup:
 
-- Any file matching `migration_*_hotfix.sql` in the repo root is auto-applied once.
+- Any repo-root file matching `migration_*.sql` is auto-applied once.
 - Applied files are tracked in `schema_migrations` with filename + checksum.
-- To add a new DB hotfix, create a new migration file (do not edit an already-applied one).
+- Files ending with `_optional.sql` remain manual-only.
+- `migration_boosts_drops.sql` remains init/setup-only bootstrap and is excluded from runtime auto-apply.
 
-Current hotfix files include:
+Guidelines:
 
-- `migration_boost_duration_hotfix.sql`
-- `migration_boost_title_case_hotfix.sql`
+- Add new DB changes as new `migration_*.sql` files (do not edit already-applied files).
+- Keep auto-applied migrations idempotent where possible.
 
-Optional economy rebalance migration (manual run only):
+Disable auto-migrations only if needed:
 
-- `migration_active_season_balance_hybrid_boost_optional.sql`
-- Use this only if you want currently active/scheduled seasons to adopt the new balancing knobs immediately.
+- `TMC_AUTO_SQL_MIGRATIONS=false`
 
-Disable auto-hotfixing only if needed:
+Backward-compatibility alias still works:
 
 - `TMC_AUTO_SQL_HOTFIX=false`
 

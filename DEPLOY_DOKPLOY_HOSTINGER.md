@@ -89,6 +89,12 @@ Optional:
 
 - `TZ=UTC`
 
+Automatic SQL migrations on redeploy are enabled by default:
+
+- New `migration_*.sql` files are auto-applied once at runtime startup.
+- `_optional.sql` files are excluded from auto-apply (manual only).
+- To disable: `TMC_AUTO_SQL_MIGRATIONS=false`.
+
 Use identical DB values in both services. The worker service uses `TMC_WORKER_*` values and `TMC_TICK_REAL_SECONDS` to process ticks internally.
 
 `TMC_TICK_ON_REQUEST=false` is recommended in production when running the worker, so tick progression does not depend on user API traffic.

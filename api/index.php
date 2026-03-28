@@ -1045,10 +1045,7 @@ function getCombineRecipesForParticipation($participation) {
 
 function shouldRevealTier6($participation) {
     $ownedT6 = (int)($participation['sigils_t6'] ?? 0);
-    if ($ownedT6 > 0) return true;
-    $ownedT5 = (int)($participation['sigils_t5'] ?? 0);
-    $required = (int)(SIGIL_COMBINE_RECIPES[5] ?? 2);
-    return $ownedT5 >= $required;
+    return $ownedT6 > 0;
 }
 
 function isPlayerFrozen($playerId, $seasonId) {

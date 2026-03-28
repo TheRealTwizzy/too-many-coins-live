@@ -6,7 +6,7 @@ require_once __DIR__ . '/config.php';
 
 class Database {
     private static $instance = null;
-    private static $hotfixChecked = false;
+    private static $migrationsChecked = false;
     private $pdo;
 
     private function __construct() {
@@ -29,26 +29,31 @@ class Database {
             die(json_encode(['error' => 'Database connection failed']));
         }
 
-        $this->applyPendingHotfixMigrations();
+        try {
+            $this->applyPendingMigrations();
+        } catch (Throwable $e) {
+            // Never block gameplay/API availability because of a migration script issue.
+            error_log('Automatic migration startup warning: ' . $e->getMessage());
+        }
     }
 
-    private function applyPendingHotfixMigrations() {
-        if (!defined('TMC_AUTO_SQL_HOTFIX') || !TMC_AUTO_SQL_HOTFIX) {
+    private function applyPendingMigrations() {
+        if (!defined('TMC_AUTO_SQL_MIGRATIONS') || !TMC_AUTO_SQL_MIGRATIONS) {
             return;
         }
 
-        if (self::$hotfixChecked) {
+        if (self::$migrationsChecked) {
             return;
         }
 
-        if (!$this->isSchemaReadyForHotfixes()) {
-            self::$hotfixChecked = true;
+        if (!$this->isSchemaReadyForMigrations()) {
+            self::$migrationsChecked = true;
             return;
         }
 
         $this->ensureMigrationTable();
 
-        $files = $this->getHotfixFiles();
+        $files = $this->getAutoMigrationFiles();
         foreach ($files as $filePath) {
             $migrationName = basename($filePath);
             $checksum = hash_file('sha256', $filePath);
@@ -63,7 +68,7 @@ class Database {
 
             if ($existing) {
                 if (($existing['checksum'] ?? '') !== $checksum) {
-                    error_log('Hotfix checksum changed for ' . $migrationName . '. Create a new hotfix filename for new patches.');
+                    error_log('Migration checksum changed for ' . $migrationName . '. Create a new migration filename for new patches.');
                 }
                 continue;
             }
@@ -80,14 +85,16 @@ class Database {
                     [$migrationName, $checksum]
                 );
             } catch (Throwable $e) {
-                throw new RuntimeException('Failed applying migration ' . $migrationName . ': ' . $e->getMessage(), 0, $e);
+                // Keep runtime online; migration can be fixed and re-attempted on next startup.
+                error_log('Failed applying migration ' . $migrationName . ': ' . $e->getMessage());
+                continue;
             }
         }
 
-        self::$hotfixChecked = true;
+        self::$migrationsChecked = true;
     }
 
-    private function isSchemaReadyForHotfixes() {
+    private function isSchemaReadyForMigrations() {
         try {
             $exists = $this->fetch(
                 "SELECT COUNT(*) AS c
@@ -112,19 +119,36 @@ class Database {
         );
     }
 
-    private function getHotfixFiles() {
+    private function getAutoMigrationFiles() {
         $repoRoot = realpath(__DIR__ . '/..');
         if ($repoRoot === false) {
             return [];
         }
 
-        $files = glob($repoRoot . DIRECTORY_SEPARATOR . 'migration_*_hotfix.sql');
+        $files = glob($repoRoot . DIRECTORY_SEPARATOR . 'migration_*.sql');
         if (!is_array($files)) {
             return [];
         }
 
-        sort($files, SORT_NATURAL | SORT_FLAG_CASE);
-        return $files;
+        $autoFiles = [];
+        foreach ($files as $filePath) {
+            $fileName = basename($filePath);
+
+            // Keep explicitly optional scripts manual-only.
+            if (preg_match('/_optional\.sql$/i', $fileName)) {
+                continue;
+            }
+
+            // Initial bootstrap migration is handled by init/setup paths.
+            if (strcasecmp($fileName, 'migration_boosts_drops.sql') === 0) {
+                continue;
+            }
+
+            $autoFiles[] = $filePath;
+        }
+
+        sort($autoFiles, SORT_NATURAL | SORT_FLAG_CASE);
+        return $autoFiles;
     }
 
     public static function getInstance() {

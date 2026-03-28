@@ -202,10 +202,10 @@ class BoostCountdownLogic
  *
  *  Tier | Name    | Scope  | duration_ticks | modifier_fp | max_stack
  *  -----+---------+--------+----------------+-------------+----------
- *    1  | Trickle | SELF   |             60 |     100,000 |         5
+ *    1  | Trickle | SELF   |             60 |      50,000 |         5
  *    2  | Surge   | SELF   |            180 |     150,000 |         5
- *    3  | Flow    | SELF   |            360 |     250,000 |         2
- *    4  | Tide    | SELF   |            720 |     500,000 |         1
+ *    3  | Flow    | SELF   |            360 |     250,000 |         5
+ *    4  | Tide    | SELF   |            720 |     500,000 |         3
  *    5  | Age     | SELF   |           1440 |   1,000,000 |         1
  */
 class BoostCatalogLogic
@@ -230,7 +230,7 @@ class BoostCatalogLogic
 
     /** Canonical modifier_fp keyed by tier_required. */
     public const MODIFIER_BY_TIER = [
-        1 => 100000,
+        1 => 50000,
         2 => 150000,
         3 => 250000,
         4 => 500000,
@@ -923,7 +923,7 @@ class BoostTimingTest extends TestCase
 
     public function testBoostCatalogModifiersAndScopes(): void
     {
-        $this->assertSame(100000, BoostCatalogLogic::MODIFIER_BY_TIER[1]);
+        $this->assertSame(50000, BoostCatalogLogic::MODIFIER_BY_TIER[1]);
         $this->assertSame(150000, BoostCatalogLogic::MODIFIER_BY_TIER[2]);
         $this->assertSame(250000, BoostCatalogLogic::MODIFIER_BY_TIER[3]);
         $this->assertSame(500000, BoostCatalogLogic::MODIFIER_BY_TIER[4]);
@@ -955,7 +955,7 @@ class BoostTimingTest extends TestCase
         foreach ($playerBSelfBoosts as $b) $playerBTotal += (int)$b['modifier_fp'];
         foreach ($globalBoosts as $b) $playerBTotal += (int)$b['modifier_fp'];
 
-        $this->assertSame(600000, $playerATotal, 'Activator gets both SELF boosts (Trickle + Tide).');
+        $this->assertSame(550000, $playerATotal, 'Activator gets both SELF boosts (Trickle + Tide).');
         $this->assertSame(500000, $playerBTotal, 'Other player gets only their own SELF boost (Tide).');
     }
 }

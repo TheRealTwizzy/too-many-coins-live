@@ -1026,8 +1026,7 @@ const TMC = {
         }
 
         const hasTier6 = Number(sigils[5] || 0) > 0;
-        const canRevealTier6 = !!participation?.tier6_visible || !!(participation?.combine_recipes || []).find((r) => Number(r.from_tier) === 5 && !!r.can_combine);
-        if (hasTier6 || canRevealTier6) {
+        if (hasTier6) {
             visible.push({ tier: 6, count: Number(sigils[5] || 0) });
         }
 
