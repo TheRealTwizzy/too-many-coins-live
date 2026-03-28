@@ -2076,6 +2076,7 @@ const TMC = {
         this.updateNotificationUI();
         if (this.state.notificationsOpen) {
             await this.loadNotifications();
+            await this.markLoadedNotificationsRead();
         }
     },
 
@@ -2104,6 +2105,38 @@ const TMC = {
         const fallbackUnread = this.state.notifications.filter((n) => !n.is_read).length;
         this.state.notificationsUnread = Number(result.unread_count ?? fallbackUnread) || 0;
         this.updateNotificationUI();
+    },
+
+    async markLoadedNotificationsRead() {
+        if (!this.state.player) return;
+
+        const unreadIds = this.state.notifications
+            .filter((n) => !n.is_read)
+            .map((n) => Number(n.notification_id))
+            .filter((id) => id > 0);
+
+        if (!unreadIds.length) return;
+
+        const unreadSet = new Set(unreadIds);
+        this.state.notifications = this.state.notifications.map((n) => (
+            unreadSet.has(Number(n.notification_id))
+                ? { ...n, is_read: true }
+                : n
+        ));
+        this.state.notificationsUnread = Math.max(0, (Number(this.state.notificationsUnread) || 0) - unreadIds.length);
+        this.updateNotificationUI();
+
+        const result = await this.api('notifications_mark_read', { notification_ids: unreadIds });
+        if (result.error) {
+            await this.loadNotifications();
+            this.toast(result.error, 'error');
+            return;
+        }
+
+        if (typeof result.unread_count !== 'undefined') {
+            this.state.notificationsUnread = Number(result.unread_count) || 0;
+            this.updateNotificationIndicator();
+        }
     },
 
     renderNotificationList() {
