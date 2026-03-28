@@ -772,9 +772,9 @@ const TMC = {
                             <p class="panel-info">Purchase Sigils with Seasonal Stars</p>
                             <div class="vault-grid">
                                 ${(detail.vault || []).map(v => {
-                                    const remaining = Number(v.effective_remaining_supply ?? v.remaining_supply ?? 0);
-                                    const initial = Number(v.effective_initial_supply ?? v.initial_supply ?? 0);
-                                    const cost = Number(v.effective_cost_stars ?? v.current_cost_stars ?? 0);
+                                    const remaining = Number(v.remaining_supply ?? 0);
+                                    const initial = Number(v.initial_supply ?? 0);
+                                    const cost = Number(v.current_cost_stars ?? 0);
                                     return `
                                     <div class="vault-item tier-${v.tier}">
                                         <span class="vault-tier">Tier ${v.tier}</span>
