@@ -1418,12 +1418,14 @@ const TMC = {
 
     getPlayerStatus(entry) {
         if (!entry.online_current) return 'Offline';
+        if (entry.lock_in_effect_tick != null) return 'Locked-In';
         return entry.activity_state || 'Offline';
     },
 
     renderPlayerStatusBadge(entry) {
         const status = this.getPlayerStatus(entry);
-        return `<span class="badge badge-${status.toLowerCase()}">${status}</span>`;
+        const key = status.toLowerCase().replace(/[^a-z]+/g, '-');
+        return `<span class="status-dot status-dot-${key}" title="${status}"></span>`;
     },
 
     setLeaderboardMeta(title, subtitle) {
@@ -1449,8 +1451,6 @@ const TMC = {
             if (entry.badge_awarded) {
                 const badgeEmoji = { first: '&#129351;', second: '&#129352;', third: '&#129353;' };
                 statusBadge += ` <span class="badge badge-${entry.badge_awarded}">${badgeEmoji[entry.badge_awarded] || ''}</span>`;
-            } else if (isLockedIn) {
-                statusBadge += ' <span class="badge badge-lockin">Locked In</span>';
             } else if (entry.end_membership) {
                 statusBadge += ' <span class="badge badge-ended">End-Finisher</span>';
             }
@@ -2119,16 +2119,11 @@ const TMC = {
 
         if (!unreadIds.length) return;
 
-        const unreadSet = new Set(unreadIds);
-        this.state.notifications = this.state.notifications.map((n) => (
-            unreadSet.has(Number(n.notification_id))
-                ? { ...n, is_read: true }
-                : n
-        ));
-        this.state.notificationsUnread = Math.max(0, (Number(this.state.notificationsUnread) || 0) - unreadIds.length);
+        this.state.notifications = this.state.notifications.map((n) => ({ ...n, is_read: true }));
+        this.state.notificationsUnread = 0;
         this.updateNotificationUI();
 
-        const result = await this.api('notifications_mark_read', { notification_ids: unreadIds });
+        const result = await this.api('notifications_mark_all_read');
         if (result.error) {
             await this.loadNotifications();
             this.toast(result.error, 'error');

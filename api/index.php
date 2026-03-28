@@ -256,6 +256,16 @@ try {
             ]);
             break;
 
+        case 'notifications_mark_all_read':
+            $player = Auth::requireAuth();
+            $updated = Notifications::markAllRead($player['player_id']);
+            echo json_encode([
+                'success' => true,
+                'updated' => $updated,
+                'unread_count' => 0
+            ]);
+            break;
+
         case 'notifications_remove':
             $player = Auth::requireAuth();
             $ids = getNotificationIdsFromInput($input);
@@ -415,8 +425,8 @@ try {
                 'trade_cancel', 'my_trades', 'season_players', 'cosmetic_catalog',
                 'purchase_cosmetic', 'equip_cosmetic', 'my_cosmetics', 'chat_send',
                 'chat_messages', 'notifications_list', 'notifications_mark_read',
-                'notifications_remove', 'notifications_create', 'profile', 'my_badges',
-                'season_history', 'tick'
+                'notifications_mark_all_read', 'notifications_remove', 'notifications_create',
+                'profile', 'my_badges', 'season_history', 'tick'
             ]]);
     }
 } catch (Exception $e) {
