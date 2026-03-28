@@ -250,6 +250,40 @@ try {
                 'unread_count' => Notifications::unreadCount($player['player_id'])
             ]);
             break;
+
+        case 'notifications_create':
+            $player = Auth::requireAuth();
+            $category = trim((string)($input['category'] ?? 'gameplay'));
+            if ($category === '') $category = 'gameplay';
+            $title = trim((string)($input['title'] ?? $input['message'] ?? 'Notification'));
+            if ($title === '') $title = 'Notification';
+            $bodyRaw = $input['body'] ?? null;
+            $body = is_string($bodyRaw) ? trim($bodyRaw) : null;
+            if ($body === '') $body = null;
+
+            $payload = null;
+            if (isset($input['payload']) && is_array($input['payload'])) {
+                $payload = $input['payload'];
+            }
+
+            $id = Notifications::create(
+                $player['player_id'],
+                $category,
+                $title,
+                $body,
+                [
+                    'is_read' => !empty($input['is_read']),
+                    'event_key' => isset($input['event_key']) ? (string)$input['event_key'] : null,
+                    'payload' => $payload
+                ]
+            );
+
+            echo json_encode([
+                'success' => true,
+                'notification' => Notifications::getByIdForPlayer($player['player_id'], $id),
+                'unread_count' => Notifications::unreadCount($player['player_id'])
+            ]);
+            break;
             
         // ==================== TRADING ====================
         case 'trade_initiate':
@@ -364,7 +398,8 @@ try {
                 'trade_cancel', 'my_trades', 'season_players', 'cosmetic_catalog',
                 'purchase_cosmetic', 'equip_cosmetic', 'my_cosmetics', 'chat_send',
                 'chat_messages', 'notifications_list', 'notifications_mark_read',
-                'notifications_remove', 'profile', 'my_badges', 'season_history', 'tick'
+                'notifications_remove', 'notifications_create', 'profile', 'my_badges',
+                'season_history', 'tick'
             ]]);
     }
 } catch (Exception $e) {

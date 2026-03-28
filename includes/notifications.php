@@ -48,15 +48,24 @@ class Notifications {
         );
 
         foreach ($rows as &$row) {
-            $row['notification_id'] = (int)$row['notification_id'];
-            $row['is_read'] = (bool)$row['is_read'];
-            $payload = $row['payload_json'] ?? null;
-            $row['payload'] = $payload ? json_decode($payload, true) : null;
-            unset($row['payload_json']);
+            $row = self::normalizeRow($row);
         }
         unset($row);
 
         return $rows;
+    }
+
+    public static function getByIdForPlayer($playerId, $notificationId) {
+        $db = Database::getInstance();
+        $row = $db->fetch(
+            "SELECT notification_id, category, title, body, payload_json, is_read, created_at, read_at
+             FROM player_notifications
+             WHERE player_id = ? AND notification_id = ? AND removed_at IS NULL",
+            [(int)$playerId, (int)$notificationId]
+        );
+
+        if (!$row) return null;
+        return self::normalizeRow($row);
     }
 
     public static function unreadCount($playerId) {
@@ -127,5 +136,14 @@ class Notifications {
         }
 
         return array_values($out);
+    }
+
+    private static function normalizeRow($row) {
+        $row['notification_id'] = (int)$row['notification_id'];
+        $row['is_read'] = (bool)$row['is_read'];
+        $payload = $row['payload_json'] ?? null;
+        $row['payload'] = $payload ? json_decode($payload, true) : null;
+        unset($row['payload_json']);
+        return $row;
     }
 }

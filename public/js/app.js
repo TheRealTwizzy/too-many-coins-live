@@ -128,7 +128,7 @@ const TMC = {
         }
         localStorage.setItem('tmc_token', result.token);
         document.cookie = `tmc_session=${result.token}; path=/; max-age=86400`;
-        this.toast('Welcome back, ' + result.handle + '!', 'success');
+        this.toast('Welcome back, ' + result.handle + '!', 'success', { category: 'auth_login' });
         await this.refreshGameState();
         if (!this.state.player || this.state.player.player_id != result.player_id) {
             await this.refreshGameState();
@@ -158,7 +158,7 @@ const TMC = {
         }
         localStorage.setItem('tmc_token', result.token);
         document.cookie = `tmc_session=${result.token}; path=/; max-age=86400`;
-        this.toast('Account created! Welcome, ' + result.handle + '!', 'success');
+        this.toast('Account created! Welcome, ' + result.handle + '!', 'success', { category: 'auth_register' });
         await this.refreshGameState();
         if (!this.state.player || this.state.player.player_id != result.player_id) {
             await this.refreshGameState();
@@ -860,7 +860,10 @@ const TMC = {
             this.toast(result.error, 'error');
             return;
         }
-        this.toast('Joined the season! Start earning Coins.', 'success');
+        this.toast('Joined the season! Start earning Coins.', 'success', {
+            category: 'season_join',
+            payload: { season_id: Number(seasonId) || null }
+        });
         await this.refreshGameState();
         this.navigate('season-detail', seasonId);
     },
@@ -877,7 +880,14 @@ const TMC = {
             this.toast(result.error, 'error');
             return;
         }
-        this.toast(`Purchased ${this.formatNumber(result.stars_purchased)} stars for ${this.formatNumber(result.coins_spent)} coins!`, 'success');
+        this.toast(`Purchased ${this.formatNumber(result.stars_purchased)} stars for ${this.formatNumber(result.coins_spent)} coins!`, 'success', {
+            category: 'purchase_star',
+            payload: {
+                stars_purchased: Number(result.stars_purchased) || 0,
+                coins_spent: Number(result.coins_spent) || 0,
+                season_id: Number(this.state.currentSeason) || null
+            }
+        });
         input.value = '';
         this.updatePurchaseEstimate();
         await this.refreshGameState();
@@ -967,7 +977,14 @@ const TMC = {
             this.toast(result.error, 'error');
             return;
         }
-        this.toast(`Purchased Tier ${tier} Sigil for ${result.cost_stars} stars!`, 'success');
+        this.toast(`Purchased Tier ${tier} Sigil for ${result.cost_stars} stars!`, 'success', {
+            category: 'purchase_sigil',
+            payload: {
+                tier: Number(tier) || null,
+                cost_stars: Number(result.cost_stars) || 0,
+                season_id: Number(this.state.currentSeason) || null
+            }
+        });
         await this.refreshGameState();
         if (this.state.currentSeason) this.loadSeasonDetail(this.state.currentSeason);
     },
@@ -1179,7 +1196,13 @@ const TMC = {
             this.toast(result.error, 'error');
             return;
         }
-        this.toast(result.message, 'success');
+        this.toast(result.message, 'success', {
+            category: 'boost_activate',
+            payload: {
+                boost_id: Number(boostId) || null,
+                season_id: Number(this.state.currentSeason) || null
+            }
+        });
         await this.refreshGameState();
         this.loadBoostCatalog();
     },
@@ -1198,7 +1221,7 @@ const TMC = {
             this.toast(result.error, 'error');
             return;
         }
-        this.toast(result.message, 'success');
+        this.toast(result.message, 'success', { category: 'season_lock_in' });
         await this.refreshGameState();
         this.navigate('home');
     },
@@ -1410,7 +1433,10 @@ const TMC = {
             this.toast(result.error, 'error');
             return;
         }
-        this.toast('Cosmetic purchased!', 'success');
+        this.toast('Cosmetic purchased!', 'success', {
+            category: 'purchase_cosmetic',
+            payload: { cosmetic_id: Number(cosmeticId) || null }
+        });
         await this.refreshGameState();
         this.loadShop();
     },
@@ -1523,7 +1549,13 @@ const TMC = {
             this.toast(result.error, 'error');
             return;
         }
-        this.toast(`Trade offer sent! Fee: ${this.formatNumber(result.fee)} coins.`, 'success');
+        this.toast(`Trade offer sent! Fee: ${this.formatNumber(result.fee)} coins.`, 'success', {
+            category: 'trade_offer_sent',
+            payload: {
+                target_player_id: Number(targetId) || null,
+                fee: Number(result.fee) || 0
+            }
+        });
         await this.refreshGameState();
         this.loadMyTrades();
     },
@@ -1584,7 +1616,10 @@ const TMC = {
     async acceptTrade(tradeId) {
         const result = await this.api('trade_accept', { trade_id: tradeId });
         if (result.error) { this.toast(result.error, 'error'); return; }
-        this.toast('Trade completed!', 'success');
+        this.toast('Trade completed!', 'success', {
+            category: 'trade_completed',
+            payload: { trade_id: Number(tradeId) || null }
+        });
         await this.refreshGameState();
         this.loadMyTrades();
     },
@@ -1909,12 +1944,15 @@ const TMC = {
         }
 
         list.innerHTML = this.state.notifications.map((n) => {
-            const itemClass = n.is_read ? 'notification-item' : 'notification-item unread';
+            const categoryView = this.getNotificationCategoryView(n.category);
+            const itemClass = n.is_read
+                ? `notification-item notification-${categoryView.tone}`
+                : `notification-item unread notification-${categoryView.tone}`;
             const body = n.body ? `<p>${this.escapeHtml(n.body)}</p>` : '';
             return `
                 <div class="${itemClass}" data-notification-id="${n.notification_id}" onclick="TMC.handleNotificationClick(event, ${n.notification_id})">
                     <div class="notification-item-head">
-                        <span class="notification-category">${this.escapeHtml((n.category || 'system').replace(/_/g, ' '))}</span>
+                        <span class="notification-category">${this.escapeHtml(categoryView.icon + ' ' + categoryView.label)}</span>
                         <span class="notification-time">${this.formatNotificationTime(n.created_at)}</span>
                     </div>
                     <h4>${this.escapeHtml(n.title || 'Notification')}</h4>
@@ -2069,6 +2107,33 @@ const TMC = {
         return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
     },
 
+    getNotificationCategoryView(category) {
+        const key = String(category || '').trim().toLowerCase();
+        const map = {
+            auth_login: { label: 'Account', icon: 'Key', tone: 'auth' },
+            auth_register: { label: 'Account', icon: 'Key', tone: 'auth' },
+            season_join: { label: 'Season', icon: 'Flag', tone: 'progress' },
+            season_lock_in: { label: 'Lock-In', icon: 'Star', tone: 'progress' },
+            purchase_star: { label: 'Stars', icon: 'Star', tone: 'purchase' },
+            purchase_sigil: { label: 'Sigils', icon: 'Diamond', tone: 'purchase' },
+            purchase_cosmetic: { label: 'Cosmetic', icon: 'Palette', tone: 'purchase' },
+            boost_activate: { label: 'Boost', icon: 'Bolt', tone: 'boost' },
+            trade_offer_sent: { label: 'Trade', icon: 'Swap', tone: 'trade' },
+            trade_completed: { label: 'Trade', icon: 'Check', tone: 'trade' },
+            sigil_drop: { label: 'Sigil Drop', icon: 'Gift', tone: 'drop' },
+            idle: { label: 'Idle', icon: 'Pause', tone: 'status' },
+            active: { label: 'Active', icon: 'Play', tone: 'status' }
+        };
+
+        if (map[key]) return map[key];
+
+        const fallbackLabel = key
+            ? key.replace(/_/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase())
+            : 'Notification';
+
+        return { label: fallbackLabel, icon: 'Info', tone: 'default' };
+    },
+
     // ==================== UTILITIES ====================
     formatNumber(n) {
         if (n === null || n === undefined) return '0';
@@ -2099,7 +2164,63 @@ const TMC = {
         return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     },
 
-    toast(message, type = 'info') {
+    async pushSuccessNotification(message, options = {}) {
+        const text = String(message || '').trim();
+        if (!text) return;
+
+        const token = localStorage.getItem('tmc_token');
+        if (!token) return;
+
+        const categoryRaw = (options && options.category) ? String(options.category).trim() : '';
+        const category = categoryRaw || 'gameplay_success';
+        const payload = options && options.payload && typeof options.payload === 'object'
+            ? options.payload
+            : null;
+        const eventKey = options && options.eventKey ? String(options.eventKey) : null;
+        const body = options && options.body ? String(options.body) : null;
+
+        const result = await this.api('notifications_create', {
+            category,
+            title: text,
+            body,
+            payload,
+            event_key: eventKey
+        });
+        if (result.error) return;
+
+        if (result.notification) {
+            const normalized = {
+                ...result.notification,
+                notification_id: Number(result.notification.notification_id),
+                is_read: !!result.notification.is_read
+            };
+            const existingIdx = this.state.notifications.findIndex(
+                (n) => Number(n.notification_id) === normalized.notification_id
+            );
+            if (existingIdx >= 0) {
+                this.state.notifications[existingIdx] = normalized;
+            } else {
+                this.state.notifications.unshift(normalized);
+            }
+        } else {
+            await this.loadNotifications();
+            return;
+        }
+
+        if (typeof result.unread_count !== 'undefined') {
+            this.state.notificationsUnread = Number(result.unread_count) || 0;
+        } else {
+            this.state.notificationsUnread = this.state.notifications.filter((n) => !n.is_read).length;
+        }
+        this.updateNotificationUI();
+    },
+
+    toast(message, type = 'info', options = {}) {
+        if (type === 'success') {
+            this.pushSuccessNotification(message, options);
+            return;
+        }
+
         const container = document.getElementById('toast-container');
         const toast = document.createElement('div');
         toast.className = `toast toast-${type}`;

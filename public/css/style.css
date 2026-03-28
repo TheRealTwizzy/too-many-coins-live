@@ -1616,6 +1616,62 @@ a:hover { text-decoration: underline; }
     letter-spacing: 0.04em;
 }
 
+.notification-item.notification-purchase .notification-category {
+    color: #fcd34d;
+}
+
+.notification-item.notification-boost .notification-category {
+    color: #60a5fa;
+}
+
+.notification-item.notification-trade .notification-category {
+    color: #22d3ee;
+}
+
+.notification-item.notification-progress .notification-category {
+    color: #f59e0b;
+}
+
+.notification-item.notification-auth .notification-category {
+    color: #a78bfa;
+}
+
+.notification-item.notification-drop .notification-category {
+    color: #34d399;
+}
+
+.notification-item.notification-status .notification-category {
+    color: #fb923c;
+}
+
+.notification-item.notification-purchase {
+    border-left: 3px solid rgba(252, 211, 77, 0.55);
+}
+
+.notification-item.notification-boost {
+    border-left: 3px solid rgba(96, 165, 250, 0.55);
+}
+
+.notification-item.notification-trade {
+    border-left: 3px solid rgba(34, 211, 238, 0.55);
+}
+
+.notification-item.notification-progress {
+    border-left: 3px solid rgba(245, 158, 11, 0.55);
+}
+
+.notification-item.notification-auth {
+    border-left: 3px solid rgba(167, 139, 250, 0.55);
+}
+
+.notification-item.notification-drop {
+    border-left: 3px solid rgba(52, 211, 153, 0.55);
+}
+
+.notification-item.notification-status {
+    border-left: 3px solid rgba(251, 146, 60, 0.55);
+}
+
 .notification-time {
     font-size: 0.68rem;
     color: var(--text-muted);
