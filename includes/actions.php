@@ -12,6 +12,52 @@ require_once __DIR__ . '/boost_catalog.php';
 require_once __DIR__ . '/notifications.php';
 
 class Actions {
+
+    private static function getVaultLeverageForTier($tier) {
+        $db = Database::getInstance();
+        $tier = max(1, (int)$tier);
+
+        $boost = $db->fetch(
+            "SELECT * FROM boost_catalog WHERE tier_required = ? ORDER BY boost_id ASC LIMIT 1",
+            [$tier]
+        );
+
+        if (!$boost) {
+            return [
+                'vault_price_discount_fp' => 0,
+                'vault_stock_leverage_fp' => FP_SCALE,
+            ];
+        }
+
+        $boost = BoostCatalog::normalize($boost);
+
+        return [
+            'vault_price_discount_fp' => max(0, min(900000, (int)($boost['vault_price_discount_fp'] ?? 0))),
+            'vault_stock_leverage_fp' => max(FP_SCALE, (int)($boost['vault_stock_leverage_fp'] ?? FP_SCALE)),
+        ];
+    }
+
+    private static function applyVaultLeverageToStats($vaultRow, $leverage) {
+        $baseCost = max(0, (int)($vaultRow['current_cost_stars'] ?? 0));
+        $baseInitial = max(0, (int)($vaultRow['initial_supply'] ?? 0));
+        $baseRemaining = max(0, (int)($vaultRow['remaining_supply'] ?? 0));
+
+        $discountFp = max(0, min(900000, (int)($leverage['vault_price_discount_fp'] ?? 0)));
+        $stockFp = max(FP_SCALE, (int)($leverage['vault_stock_leverage_fp'] ?? FP_SCALE));
+
+        $effectiveCost = max(1, intdiv($baseCost * (FP_SCALE - $discountFp), FP_SCALE));
+        $effectiveInitial = intdiv($baseInitial * $stockFp, FP_SCALE);
+        $effectiveRemaining = intdiv($baseRemaining * $stockFp, FP_SCALE);
+
+        return [
+            'base_cost_stars' => $baseCost,
+            'effective_cost_stars' => $effectiveCost,
+            'effective_initial_supply' => max(0, $effectiveInitial),
+            'effective_remaining_supply' => max(0, $effectiveRemaining),
+            'vault_price_discount_fp' => $discountFp,
+            'vault_stock_leverage_fp' => $stockFp,
+        ];
+    }
     
     /**
      * Join a season
@@ -205,8 +251,10 @@ class Actions {
         if (!$vault || $vault['remaining_supply'] <= 0) {
             return ['error' => 'This tier is sold out'];
         }
-        
-        $costStars = (int)$vault['current_cost_stars'];
+
+        $leverage = self::getVaultLeverageForTier($tier);
+        $vaultStats = self::applyVaultLeverageToStats($vault, $leverage);
+        $costStars = (int)$vaultStats['effective_cost_stars'];
         
         $participation = $db->fetch(
             "SELECT * FROM season_participation WHERE player_id = ? AND season_id = ?",
@@ -239,7 +287,16 @@ class Actions {
             );
             
             $db->commit();
-            return ['success' => true, 'tier' => $tier, 'cost_stars' => $costStars];
+            return [
+                'success' => true,
+                'tier' => $tier,
+                'cost_stars' => $costStars,
+                'base_cost_stars' => (int)$vaultStats['base_cost_stars'],
+                'effective_remaining_supply' => max(0, (int)$vaultStats['effective_remaining_supply'] - 1),
+                'effective_initial_supply' => (int)$vaultStats['effective_initial_supply'],
+                'vault_price_discount_fp' => (int)$vaultStats['vault_price_discount_fp'],
+                'vault_stock_leverage_fp' => (int)$vaultStats['vault_stock_leverage_fp'],
+            ];
         } catch (Exception $e) {
             $db->rollback();
             return ['error' => 'Vault purchase failed'];

@@ -59,10 +59,27 @@ class EconomyPrecisionTest extends TestCase
 
     public function testEffectiveSigilTierChanceMatchesConfigMath(): void
     {
-        $basePercent = 100 / SIGIL_DROP_RATE;
+        $basePercent = 100 / Economy::sigilDropRateForPower(0);
         $tierOneConditional = SIGIL_TIER_ODDS[1] / FP_SCALE;
         $effectivePercent = $basePercent * $tierOneConditional;
 
-        $this->assertEqualsWithDelta(0.125067, $effectivePercent, 0.000001);
+        $this->assertEqualsWithDelta(0.25, $effectivePercent, 0.000001);
+    }
+
+    public function testEffectiveSigilTierChancesDecreaseAtFullPower(): void
+    {
+        $lowPowerOdds = Economy::adjustedSigilTierOdds(0);
+        $highPowerOdds = Economy::adjustedSigilTierOdds(SIGIL_POWER_FULL_SHIFT);
+        $lowBasePercent = 100 / Economy::sigilDropRateForPower(0);
+        $highBasePercent = 100 / Economy::sigilDropRateForPower(SIGIL_POWER_FULL_SHIFT);
+
+        for ($tier = 1; $tier <= 5; $tier++) {
+            $lowEffective = $lowBasePercent * (((int)$lowPowerOdds[$tier]) / FP_SCALE);
+            $highEffective = $highBasePercent * (((int)$highPowerOdds[$tier]) / FP_SCALE);
+            $this->assertTrue(
+                $highEffective < $lowEffective,
+                sprintf('Expected Tier %d effective chance to decrease with sigil power.', $tier)
+            );
+        }
     }
 }

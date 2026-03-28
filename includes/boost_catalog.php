@@ -24,6 +24,8 @@ class BoostCatalog
             'max_stack' => 5,
             'icon' => 'trickle',
             'sigil_cost' => 1,
+            'vault_price_discount_fp' => 0,
+            'vault_stock_leverage_fp' => 1000000,
         ],
         2 => [
             'name' => 'Surge',
@@ -34,6 +36,8 @@ class BoostCatalog
             'max_stack' => 5,
             'icon' => 'surge',
             'sigil_cost' => 1,
+            'vault_price_discount_fp' => 50000,
+            'vault_stock_leverage_fp' => 1100000,
         ],
         3 => [
             'name' => 'Flow',
@@ -44,6 +48,8 @@ class BoostCatalog
             'max_stack' => 5,
             'icon' => 'flow',
             'sigil_cost' => 1,
+            'vault_price_discount_fp' => 100000,
+            'vault_stock_leverage_fp' => 1250000,
         ],
         4 => [
             'name' => 'Tide',
@@ -54,6 +60,8 @@ class BoostCatalog
             'max_stack' => 3,
             'icon' => 'tide',
             'sigil_cost' => 1,
+            'vault_price_discount_fp' => 150000,
+            'vault_stock_leverage_fp' => 1400000,
         ],
         5 => [
             'name' => 'Age',
@@ -64,6 +72,8 @@ class BoostCatalog
             'max_stack' => 1,
             'icon' => 'age',
             'sigil_cost' => 1,
+            'vault_price_discount_fp' => 200000,
+            'vault_stock_leverage_fp' => 1600000,
         ],
     ];
 
@@ -92,6 +102,8 @@ class BoostCatalog
         $boost['max_stack'] = $canonical['max_stack'];
         $boost['icon'] = $canonical['icon'];
         $boost['sigil_cost'] = $canonical['sigil_cost'];
+        $boost['vault_price_discount_fp'] = (int)$canonical['vault_price_discount_fp'];
+        $boost['vault_stock_leverage_fp'] = (int)$canonical['vault_stock_leverage_fp'];
         $boost['current_stack'] = max(0, min(
             (int)$boost['max_stack'],
             (int)ceil(max(0, (int)$boost['modifier_fp']) / max(1, (int)$boost['base_modifier_fp']))

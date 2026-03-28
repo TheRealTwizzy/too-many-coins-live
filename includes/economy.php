@@ -57,6 +57,20 @@ class Economy {
         $tiers[1] = max(0, (int)$tiers[1] + $delta);
         return $tiers;
     }
+
+    /**
+     * Scale base sigil drop Bernoulli denominator by sigil power.
+     * Higher denominator means lower base drop chance.
+     */
+    public static function sigilDropRateForPower($sigilPower) {
+        $baseRate = max(1, (int)SIGIL_DROP_RATE);
+        $maxRate = max($baseRate, (int)(defined('SIGIL_DROP_RATE_MAX_POWER') ? SIGIL_DROP_RATE_MAX_POWER : $baseRate));
+        $fullShift = max(1, (int)SIGIL_POWER_FULL_SHIFT);
+        $power = max(0, (int)$sigilPower);
+        $ratioFp = min(FP_SCALE, intdiv($power * FP_SCALE, $fullShift));
+
+        return max(1, intdiv(($baseRate * (FP_SCALE - $ratioFp)) + ($maxRate * $ratioFp), FP_SCALE));
+    }
     
     /**
      * Fixed-point multiply with floor: floor(base * mult_fp / 1_000_000)
@@ -336,8 +350,9 @@ class Economy {
         // (0–4,294,967,295) is far larger than SIGIL_DROP_RATE and 1,000,000,
         // so the modulo distribution is effectively uniform.
 
-        // Bernoulli trial: bytes 0-3 mod SIGIL_DROP_RATE
-        $trial = unpack('N', substr($hash, 0, 4))[1] % SIGIL_DROP_RATE;
+        // Bernoulli trial: bytes 0-3 mod drop-rate denominator (power-scaled)
+        $dropRate = self::sigilDropRateForPower($sigilPower);
+        $trial = unpack('N', substr($hash, 0, 4))[1] % $dropRate;
         
         if ($trial !== 0) return 0; // No drop
         

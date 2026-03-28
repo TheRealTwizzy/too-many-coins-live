@@ -771,18 +771,22 @@ const TMC = {
                             <h4>Sigil Vault</h4>
                             <p class="panel-info">Purchase Sigils with Seasonal Stars</p>
                             <div class="vault-grid">
-                                ${(detail.vault || []).map(v => `
+                                ${(detail.vault || []).map(v => {
+                                    const remaining = Number(v.effective_remaining_supply ?? v.remaining_supply ?? 0);
+                                    const initial = Number(v.effective_initial_supply ?? v.initial_supply ?? 0);
+                                    const cost = Number(v.effective_cost_stars ?? v.current_cost_stars ?? 0);
+                                    return `
                                     <div class="vault-item tier-${v.tier}">
                                         <span class="vault-tier">Tier ${v.tier}</span>
-                                        <span class="vault-remaining">${v.remaining_supply}/${v.initial_supply} left</span>
-                                        <span class="vault-cost">${v.current_cost_stars} stars</span>
+                                        <span class="vault-remaining">${remaining}/${initial} left</span>
+                                        <span class="vault-cost">${cost} stars</span>
                                         <button class="btn btn-sm btn-primary" 
                                             onclick="TMC.purchaseVault(${v.tier})"
-                                            ${v.remaining_supply <= 0 || isBlackout ? 'disabled' : ''}>
-                                            ${v.remaining_supply <= 0 ? 'Sold Out' : 'Buy'}
+                                            ${remaining <= 0 || isBlackout ? 'disabled' : ''}>
+                                            ${remaining <= 0 ? 'Sold Out' : 'Buy'}
                                         </button>
                                     </div>
-                                `).join('')}
+                                `;}).join('')}
                             </div>
                         </div>
                     </div>
@@ -1173,7 +1177,15 @@ const TMC = {
                 tide: '12hrs',
                 age: '24hrs',
             };
+            const timePurchaseLabelByBoost = {
+                trickle: '+5 mins',
+                surge: '+15 mins',
+                flow: '+30 mins',
+                tide: '+60 mins',
+                age: '+90 mins',
+            };
             const durationLabel = durationDisplayByBoost[boostKey] || this.formatBoostDuration(durationTicks, 'short');
+            const timePurchaseLabel = timePurchaseLabelByBoost[boostKey] || `+${timeExtensionTicks} mins`;
 
             return `
                 <div class="boost-card tier-${tier} ${hasSigil ? '' : 'boost-locked'}">
@@ -1199,7 +1211,7 @@ const TMC = {
                         <button class="btn btn-sm ${hasSigil ? 'btn-outline' : 'btn-outline'}"
                             onclick="TMC.purchaseBoostTime(${b.boost_id})"
                             ${(!hasSigil || !canBuyTime) ? 'disabled title="Activate boost power first"' : ''}>
-                            Time +${timeExtensionTicks}m
+                            Time ${timePurchaseLabel}
                         </button>
                     </div>
                 </div>

@@ -56,7 +56,8 @@ define('HOARDING_WINDOW_TICKS', ticks_from_real_seconds(86400));  // 24 real hou
 define('MIN_PARTICIPATION_TICKS', 1);
 
 // Sigil drops
-define('SIGIL_DROP_RATE', max(1, (int)round(7260 / 60)));  // 1 in 121 (~0.826% base)
+define('SIGIL_DROP_RATE', max(1, (int)round(7260 / 60)));  // 1 in 121 (~0.826% base at 0 sigil power)
+define('SIGIL_DROP_RATE_MAX_POWER', 220);                  // 1 in 220 (~0.455% base at full sigil power)
 define('SIGIL_PITY_TICKS', ticks_from_real_seconds(120000));
 define('SIGIL_MAX_DROPS_WINDOW', 8);
 define('SIGIL_DROP_WINDOW_TICKS', ticks_from_real_seconds(86400));
@@ -74,11 +75,11 @@ define('SIGIL_COMBINE_RECIPES', [
 // Tier-odds scaling by sigil power. Tier 6 is intentionally excluded from RNG drops.
 define('SIGIL_POWER_FULL_SHIFT', 40);
 define('SIGIL_TIER_ODDS_MAX_POWER', [
-    1 => 50000,
-    2 => 250000,
-    3 => 350000,
-    4 => 250000,
-    5 => 100000,
+    1 => 302500,
+    2 => 267500,
+    3 => 215000,
+    4 => 145000,
+    5 => 70000,
 ]);
 
 // Freeze mechanics (Tier 6 sigil action)
@@ -93,11 +94,11 @@ define('BOOST_GUARANTEED_FLOOR_CAP_COINS', 0);
 
 // Sigil tier odds (fixed-point, sum = 1,000,000)
 define('SIGIL_TIER_ODDS', [
-    1 => 151331,  // ~0.125% effective Tier I baseline
-    2 => 420000,
-    3 => 280000,
-    4 => 120000,
-    5 => 28669
+    1 => 302500,  // ~0.25% effective Tier I baseline (at 0 sigil power)
+    2 => 267500,
+    3 => 215000,
+    4 => 145000,
+    5 => 70000,
 ]);
 
 // Participation bonus

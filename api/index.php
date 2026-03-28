@@ -427,10 +427,13 @@ try {
 
 // ==================== HELPER FUNCTIONS ====================
 
-function getSigilDropRateMetadata() {
-    $basePercent = 100 / max(1, (int)SIGIL_DROP_RATE);
+function getSigilDropRateMetadata($sigilPower = 0) {
+    $sigilPower = max(0, (int)$sigilPower);
+    $dropRate = Economy::sigilDropRateForPower($sigilPower);
+    $basePercent = 100 / max(1, (int)$dropRate);
+    $tierOdds = Economy::adjustedSigilTierOdds($sigilPower);
     $tiers = [];
-    foreach (SIGIL_TIER_ODDS as $tier => $oddsFp) {
+    foreach ($tierOdds as $tier => $oddsFp) {
         $conditionalPercent = ((int)$oddsFp / 1000000) * 100;
         $effectivePercent = $basePercent * ((int)$oddsFp / 1000000);
         $tiers[] = [
@@ -442,10 +445,68 @@ function getSigilDropRateMetadata() {
     }
 
     return [
-        'base_one_in' => (int)SIGIL_DROP_RATE,
+        'sigil_power' => $sigilPower,
+        'base_one_in' => (int)$dropRate,
         'base_percent' => round($basePercent, 6),
         'tiers' => $tiers
     ];
+}
+
+function getVaultLeverageByTier() {
+    static $leverageByTier = null;
+    if ($leverageByTier !== null) {
+        return $leverageByTier;
+    }
+
+    $db = Database::getInstance();
+    $rows = $db->fetchAll("SELECT * FROM boost_catalog ORDER BY tier_required ASC, boost_id ASC");
+    $leverageByTier = [];
+
+    foreach ($rows as $row) {
+        $normalized = BoostCatalog::normalize($row);
+        $tier = (int)($normalized['tier_required'] ?? 0);
+        if ($tier <= 0 || isset($leverageByTier[$tier])) {
+            continue;
+        }
+
+        $leverageByTier[$tier] = [
+            'vault_price_discount_fp' => max(0, min(900000, (int)($normalized['vault_price_discount_fp'] ?? 0))),
+            'vault_stock_leverage_fp' => max(FP_SCALE, (int)($normalized['vault_stock_leverage_fp'] ?? FP_SCALE)),
+        ];
+    }
+
+    return $leverageByTier;
+}
+
+function applyVaultLeverageToRows($rows) {
+    $leverageByTier = getVaultLeverageByTier();
+    $out = [];
+
+    foreach ($rows as $row) {
+        $tier = (int)($row['tier'] ?? 0);
+        $leverage = $leverageByTier[$tier] ?? [
+            'vault_price_discount_fp' => 0,
+            'vault_stock_leverage_fp' => FP_SCALE,
+        ];
+
+        $discountFp = (int)$leverage['vault_price_discount_fp'];
+        $stockFp = (int)$leverage['vault_stock_leverage_fp'];
+
+        $baseCost = max(0, (int)($row['current_cost_stars'] ?? 0));
+        $baseInitial = max(0, (int)($row['initial_supply'] ?? 0));
+        $baseRemaining = max(0, (int)($row['remaining_supply'] ?? 0));
+
+        $row['base_cost_stars'] = $baseCost;
+        $row['effective_cost_stars'] = max(1, intdiv($baseCost * (FP_SCALE - $discountFp), FP_SCALE));
+        $row['effective_initial_supply'] = max(0, intdiv($baseInitial * $stockFp, FP_SCALE));
+        $row['effective_remaining_supply'] = max(0, intdiv($baseRemaining * $stockFp, FP_SCALE));
+        $row['vault_price_discount_fp'] = $discountFp;
+        $row['vault_stock_leverage_fp'] = $stockFp;
+
+        $out[] = $row;
+    }
+
+    return $out;
 }
 
 function calculatePlayerRatePerTick($season, $player, $participation, $activeBoosts) {
@@ -493,6 +554,7 @@ function getGameState($player) {
             "SELECT * FROM season_vault WHERE season_id = ? ORDER BY tier",
             [$s['season_id']]
         );
+        $s['vault'] = applyVaultLeverageToRows($s['vault']);
         $s['sigil_drop_rates'] = getSigilDropRateMetadata();
         
         // Remove binary seed from response
@@ -636,6 +698,7 @@ function getSeasonDetail($player, $seasonId) {
         "SELECT * FROM season_vault WHERE season_id = ? ORDER BY tier",
         [$seasonId]
     );
+    $season['vault'] = applyVaultLeverageToRows($season['vault']);
     $season['sigil_drop_rates'] = getSigilDropRateMetadata();
 
     if ($player && (int)$player['joined_season_id'] === (int)$seasonId && (int)$player['participation_enabled'] === 1) {
@@ -644,6 +707,8 @@ function getSeasonDetail($player, $seasonId) {
             [(int)$player['player_id'], (int)$seasonId]
         );
         if ($participation) {
+            $sigilPower = Economy::calculateSigilPower($participation);
+            $season['sigil_drop_rates'] = getSigilDropRateMetadata($sigilPower);
             $season['player_combine_recipes'] = getCombineRecipesForParticipation($participation);
             $season['player_tier6_visible'] = shouldRevealTier6($participation);
             $season['player_can_freeze'] = ((int)($participation['sigils_t6'] ?? 0) > 0);
