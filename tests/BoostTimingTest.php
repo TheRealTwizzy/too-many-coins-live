@@ -195,6 +195,40 @@ class BoostCountdownLogic
     }
 }
 
+/**
+ * Encodes the canonical boost catalog tier definitions from boost_catalog seed data.
+ * These constants mirror the seeded rows in migration_boosts_drops.sql and are used
+ * to drive tier-specific timing tests without hard-coding magic numbers inline.
+ *
+ *  Tier | Name         | Scope  | duration_ticks | modifier_fp | max_stack
+ *  -----+--------------+--------+----------------+-------------+----------
+ *    1  | Coin Trickle | SELF   |              1 |     100,000 |         3
+ *    2  | Coin Surge   | SELF   |              2 |     250,000 |         2
+ *    3  | Golden Flow  | SELF   |              3 |     500,000 |         1
+ *    4  | Rising Tide  | GLOBAL |             60 |     150,000 |         1
+ *    5  | Golden Age   | GLOBAL |            120 |     300,000 |         1
+ */
+class BoostCatalogLogic
+{
+    /** Canonical duration_ticks keyed by tier_required. */
+    public const DURATION_BY_TIER = [
+        1 => 1,   // Coin Trickle – 1 tick  (1 minute  at 60 s/tick)
+        2 => 2,   // Coin Surge   – 2 ticks (2 minutes)
+        3 => 3,   // Golden Flow  – 3 ticks (3 minutes)
+        4 => 60,  // Rising Tide  – 60 ticks (1 hour)
+        5 => 120, // Golden Age   – 120 ticks (2 hours)
+    ];
+
+    /** Scope keyed by tier_required. */
+    public const SCOPE_BY_TIER = [
+        1 => 'SELF',
+        2 => 'SELF',
+        3 => 'SELF',
+        4 => 'GLOBAL',
+        5 => 'GLOBAL',
+    ];
+}
+
 class BoostTimingTest extends TestCase
 {
     // -----------------------------------------------------------------------
@@ -626,5 +660,255 @@ class BoostTimingTest extends TestCase
             'Boost must still have remaining time one second before expiresAtReal.');
         $this->assertSame(0, $atExpiry,
             'Boost must have zero remaining time exactly at expiresAtReal.');
+    }
+
+    // -----------------------------------------------------------------------
+    // Boost catalog: tier-to-duration mapping validation
+    // -----------------------------------------------------------------------
+
+    /**
+     * Verifies the canonical tier-to-duration mapping from the boost catalog
+     * seed data (migration_boosts_drops.sql).
+     * These durations feed directly into expires_tick = gameTime + duration_ticks.
+     */
+    public function testBoostCatalogTierDurations(): void
+    {
+        $expected = [
+            1 => 1,
+            2 => 2,
+            3 => 3,
+            4 => 60,
+            5 => 120,
+        ];
+
+        foreach ($expected as $tier => $expectedDuration) {
+            $this->assertSame(
+                $expectedDuration,
+                BoostCatalogLogic::DURATION_BY_TIER[$tier],
+                "Tier {$tier} boost must have a canonical duration of {$expectedDuration} ticks."
+            );
+        }
+    }
+
+    /**
+     * For every tier (1–5), verifies that:
+     *   - the boost applies at T+1 (first tick after purchase),
+     *   - the boost applies at expires_tick (last tick of the window),
+     *   - the boost does NOT apply at expires_tick + 1,
+     *   - the boost appears in the active listing at expires_tick,
+     *   - the boost does NOT appear in the active listing at expires_tick + 1.
+     */
+    public function testAllTierDurationBehaviourMatches(): void
+    {
+        $purchaseTick = 1000;
+
+        foreach (BoostCatalogLogic::DURATION_BY_TIER as $tier => $durationTicks) {
+            $expiresTick = BoostTimingLogic::computeExpiresTick($purchaseTick, $durationTicks);
+
+            // Must apply at first tick after purchase
+            $result = BoostTimingLogic::processTick($expiresTick, true, $purchaseTick + 1);
+            $this->assertTrue($result['applied'],
+                "Tier {$tier} boost must apply at tick T+1.");
+
+            // Must apply on the last tick (= expires_tick)
+            $result = BoostTimingLogic::processTick($expiresTick, true, $expiresTick);
+            $this->assertTrue($result['applied'],
+                "Tier {$tier} boost must apply at expires_tick (T+{$durationTicks}).");
+
+            // Must NOT apply one tick after expires_tick
+            $result = BoostTimingLogic::processTick($expiresTick, true, $expiresTick + 1);
+            $this->assertFalse($result['applied'],
+                "Tier {$tier} boost must NOT apply one tick after expires_tick.");
+
+            // Listing: boost must be visible at expires_tick
+            $storedBoost = ['id' => $tier * 100, 'expires_tick' => $expiresTick, 'is_active' => true];
+            $active = BoostPersistenceLogic::fetchActiveBoosts([$storedBoost], $expiresTick);
+            $this->assertCount(1, $active,
+                "Tier {$tier} boost must still appear in active listing at expires_tick.");
+
+            // Listing: boost must NOT be visible at expires_tick + 1
+            $active = BoostPersistenceLogic::fetchActiveBoosts([$storedBoost], $expiresTick + 1);
+            $this->assertCount(0, $active,
+                "Tier {$tier} boost must NOT appear in active listing at expires_tick + 1.");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Tier-specific boundary tests (3, 4, 5)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Tier III self boost (Golden Flow) – 3 ticks.
+     * Canonical duration from boost_catalog: duration_ticks = 3.
+     * Verifies the boundary: applies at expires_tick, not at expires_tick + 1.
+     */
+    public function testTierThreeSelfBoostBoundary(): void
+    {
+        $purchaseTick  = 200;
+        $durationTicks = BoostCatalogLogic::DURATION_BY_TIER[3]; // 3
+        $expiresTick   = BoostTimingLogic::computeExpiresTick($purchaseTick, $durationTicks);
+        // expiresTick = 203
+
+        $result = BoostTimingLogic::processTick($expiresTick, true, 203);
+        $this->assertTrue($result['applied'],
+            'Tier 3 boost must still apply at expires_tick (tick 203).');
+        $this->assertTrue($result['isActiveAfter'],
+            'Tier 3 boost must remain active-flagged at expires_tick.');
+
+        $result = BoostTimingLogic::processTick($expiresTick, $result['isActiveAfter'], 204);
+        $this->assertFalse($result['applied'],
+            'Tier 3 boost must NOT apply at expires_tick + 1 (tick 204).');
+    }
+
+    /**
+     * Tier IV global boost (Rising Tide) – 60 ticks.
+     * Canonical duration from boost_catalog: duration_ticks = 60 (1 hour).
+     * Spot-checks: T+1 (first), T+30 (mid), T+60 (last = expires_tick), T+61 (expired).
+     */
+    public function testTierFourGlobalBoostBoundary(): void
+    {
+        $purchaseTick  = 500;
+        $durationTicks = BoostCatalogLogic::DURATION_BY_TIER[4]; // 60
+        $expiresTick   = BoostTimingLogic::computeExpiresTick($purchaseTick, $durationTicks);
+        // expiresTick = 560
+
+        // T+1 – first tick
+        $result = BoostTimingLogic::processTick($expiresTick, true, 501);
+        $this->assertTrue($result['applied'],
+            'Tier 4 boost must apply at T+1 (tick 501).');
+
+        // T+30 – mid-duration spot-check
+        $result = BoostTimingLogic::processTick($expiresTick, true, 530);
+        $this->assertTrue($result['applied'],
+            'Tier 4 boost must apply at the mid-duration tick T+30 (tick 530).');
+
+        // T+60 – last tick (= expires_tick)
+        $result = BoostTimingLogic::processTick($expiresTick, true, 560);
+        $this->assertTrue($result['applied'],
+            'Tier 4 boost must apply at expires_tick T+60 (tick 560).');
+        $this->assertTrue($result['isActiveAfter'],
+            'Tier 4 boost must remain active-flagged at expires_tick.');
+
+        // T+61 – expired
+        $result = BoostTimingLogic::processTick($expiresTick, $result['isActiveAfter'], 561);
+        $this->assertFalse($result['applied'],
+            'Tier 4 boost must NOT apply at T+61 (tick 561).');
+    }
+
+    /**
+     * Tier V global boost (Golden Age) – 120 ticks.
+     * Canonical duration from boost_catalog: duration_ticks = 120 (2 hours).
+     * Spot-checks: T+1 (first), T+60 (midpoint), T+120 (last = expires_tick), T+121 (expired).
+     */
+    public function testTierFiveGlobalBoostBoundary(): void
+    {
+        $purchaseTick  = 1000;
+        $durationTicks = BoostCatalogLogic::DURATION_BY_TIER[5]; // 120
+        $expiresTick   = BoostTimingLogic::computeExpiresTick($purchaseTick, $durationTicks);
+        // expiresTick = 1120
+
+        // T+1 – first tick
+        $result = BoostTimingLogic::processTick($expiresTick, true, 1001);
+        $this->assertTrue($result['applied'],
+            'Tier 5 boost must apply at T+1 (tick 1001).');
+
+        // T+60 – midpoint
+        $result = BoostTimingLogic::processTick($expiresTick, true, 1060);
+        $this->assertTrue($result['applied'],
+            'Tier 5 boost must apply at the midpoint tick T+60 (tick 1060).');
+
+        // T+120 – last tick (= expires_tick)
+        $result = BoostTimingLogic::processTick($expiresTick, true, 1120);
+        $this->assertTrue($result['applied'],
+            'Tier 5 boost must apply at expires_tick T+120 (tick 1120).');
+        $this->assertTrue($result['isActiveAfter'],
+            'Tier 5 boost must remain active-flagged at expires_tick.');
+
+        // T+121 – expired
+        $result = BoostTimingLogic::processTick($expiresTick, $result['isActiveAfter'], 1121);
+        $this->assertFalse($result['applied'],
+            'Tier 5 boost must NOT apply at T+121 (tick 1121).');
+        $this->assertFalse($result['isActiveAfter'],
+            'Tier 5 boost must be expired at T+121.');
+    }
+
+    /**
+     * Exhaustive check: tier V (Golden Age) boost applies for all 120 ticks
+     * in its window without any premature expiration.
+     */
+    public function testTierFiveGlobalBoostRemainsActiveForAll120Ticks(): void
+    {
+        $purchaseTick  = 2000;
+        $durationTicks = BoostCatalogLogic::DURATION_BY_TIER[5]; // 120
+        $expiresTick   = BoostTimingLogic::computeExpiresTick($purchaseTick, $durationTicks);
+        // expiresTick = 2120
+
+        $isActive = true;
+
+        for ($tick = 2001; $tick <= 2120; $tick++) {
+            $result = BoostTimingLogic::processTick($expiresTick, $isActive, $tick);
+            $this->assertTrue(
+                $result['applied'],
+                "Tier 5 120-tick boost must apply at tick {$tick} (T+" . ($tick - $purchaseTick) . ').'
+            );
+            $isActive = $result['isActiveAfter'];
+        }
+
+        // Tick T+121: must be expired
+        $result = BoostTimingLogic::processTick($expiresTick, $isActive, 2121);
+        $this->assertFalse($result['applied'],
+            'Tier 5 120-tick boost must NOT apply at T+121.');
+    }
+
+    // -----------------------------------------------------------------------
+    // Active-boost listing visibility throughout boost lifetime
+    // -----------------------------------------------------------------------
+
+    /**
+     * Verifies that a boost appears in the server-side active listing at every
+     * game tick throughout its configured lifetime, and disappears immediately
+     * after the expiry tick.
+     *
+     * Mirrors the SQL filter used by getActiveBoosts():
+     *   "WHERE is_active = 1 AND expires_tick >= gameTime"
+     */
+    public function testActiveBoostListedThroughoutLifetime(): void
+    {
+        // Tier 4 global boost: purchased at tick 300, expires at 360
+        $storedBoost = ['id' => 10, 'expires_tick' => 360, 'is_active' => true];
+
+        // Must be visible at every sampled tick from purchase through expires_tick
+        foreach ([300, 301, 320, 340, 359, 360] as $gameTime) {
+            $active = BoostPersistenceLogic::fetchActiveBoosts([$storedBoost], $gameTime);
+            $this->assertCount(1, $active,
+                "Boost must appear in active listing at gameTime = {$gameTime} (expires_tick = 360).");
+        }
+
+        // Must NOT be visible one tick after expires_tick
+        $active = BoostPersistenceLogic::fetchActiveBoosts([$storedBoost], 361);
+        $this->assertCount(0, $active,
+            'Boost must NOT appear in active listing at gameTime = 361 (one tick after expires_tick = 360).');
+    }
+
+    /**
+     * Tier V boost (120-tick): verifies active-listing visibility at key
+     * points throughout its window, and removal immediately after expiry.
+     */
+    public function testTierFiveBoostListingVisibilityAndRemoval(): void
+    {
+        // Tier 5 boost: purchased at tick 1000, expires at 1120
+        $storedBoost = ['id' => 20, 'expires_tick' => 1120, 'is_active' => true];
+
+        // Must be visible at purchase tick, first tick, midpoint, and expires_tick
+        foreach ([1000, 1001, 1060, 1119, 1120] as $gameTime) {
+            $active = BoostPersistenceLogic::fetchActiveBoosts([$storedBoost], $gameTime);
+            $this->assertCount(1, $active,
+                "Tier 5 boost must appear in active listing at gameTime = {$gameTime}.");
+        }
+
+        // Must NOT be visible one tick after the 120-tick window ends
+        $active = BoostPersistenceLogic::fetchActiveBoosts([$storedBoost], 1121);
+        $this->assertCount(0, $active,
+            'Tier 5 boost must NOT appear in active listing at gameTime = 1121 (tick after expiry).');
     }
 }
