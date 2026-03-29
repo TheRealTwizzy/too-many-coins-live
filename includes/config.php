@@ -56,8 +56,16 @@ define('HOARDING_WINDOW_TICKS', ticks_from_real_seconds(86400));  // 24 real hou
 define('MIN_PARTICIPATION_TICKS', 1);
 
 // Sigil drops
-define('SIGIL_DROP_RATE', max(1, (int)round(7260 / 60)));  // 1 in 121 (~0.826% base at 0 sigil power)
-define('SIGIL_DROP_RATE_MAX_POWER', 220);                  // 1 in 220 (~0.455% base at full sigil power)
+// Per-tier effective drop rates at zero sigil power (parts per 10,000; T1=2.50% down to T5=0.50%)
+define('SIGIL_TIER_DROP_RATES', [
+    1 => 250,  // 2.50%
+    2 => 200,  // 2.00%
+    3 => 150,  // 1.50%
+    4 => 100,  // 1.00%
+    5 =>  50,  // 0.50%
+]);
+define('SIGIL_DROP_RATE', 13);           // 1 in 13 (~7.69% combined base drop rate at 0 sigil power)
+define('SIGIL_DROP_RATE_MAX_POWER', 26); // 1 in 26 (~3.85% combined drop rate at full sigil power)
 define('SIGIL_PITY_TICKS', ticks_from_real_seconds(120000));
 define('SIGIL_MAX_DROPS_WINDOW', 8);
 define('SIGIL_DROP_WINDOW_TICKS', ticks_from_real_seconds(86400));
@@ -75,11 +83,11 @@ define('SIGIL_COMBINE_RECIPES', [
 // Tier-odds scaling by sigil power. Tier 6 is intentionally excluded from RNG drops.
 define('SIGIL_POWER_FULL_SHIFT', 40);
 define('SIGIL_TIER_ODDS_MAX_POWER', [
-    1 => 302500,
-    2 => 267500,
-    3 => 215000,
-    4 => 145000,
-    5 => 70000,
+    1 => 333333,
+    2 => 266667,
+    3 => 200000,
+    4 => 133333,
+    5 =>  66667,
 ]);
 
 // Freeze mechanics (Tier 6 sigil action)
@@ -93,12 +101,13 @@ define('BOOST_GUARANTEED_FLOOR_STEP_COINS', 1);
 define('BOOST_GUARANTEED_FLOOR_CAP_COINS', 0);
 
 // Sigil tier odds (fixed-point, sum = 1,000,000)
+// Proportional to SIGIL_TIER_DROP_RATES: T1=2.5%, T2=2.0%, T3=1.5%, T4=1.0%, T5=0.5% of total 7.5%
 define('SIGIL_TIER_ODDS', [
-    1 => 302500,  // ~0.25% effective Tier I baseline (at 0 sigil power)
-    2 => 267500,
-    3 => 215000,
-    4 => 145000,
-    5 => 70000,
+    1 => 333333,  // ~2.56% effective T1 at 0 sigil power (≈ 2.5% target)
+    2 => 266667,  // ~2.05% effective T2
+    3 => 200000,  // ~1.54% effective T3
+    4 => 133333,  // ~1.03% effective T4
+    5 =>  66667,  // ~0.51% effective T5 (≈ 0.5% target)
 ]);
 
 // Participation bonus

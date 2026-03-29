@@ -606,6 +606,8 @@ const TMC = {
             return;
         }
 
+        const isBlackout = (season.computed_status || season.status) === 'Blackout';
+
         // Update economy bar values if they exist
         const econValues = document.querySelectorAll('.econ-value');
         if (econValues.length >= 3) {
@@ -631,11 +633,34 @@ const TMC = {
             });
         }
 
-        // Update lock-in star count
+        // Update lock-in star count and disabled state
         const lockInBtn = document.querySelector('.panel-lockin .btn-danger');
         if (lockInBtn) {
             lockInBtn.textContent = `Lock-In (${this.formatNumber(p.participation.seasonal_stars)} Stars)`;
+            lockInBtn.disabled = !p.can_lock_in || isBlackout;
         }
+
+        // Update forge combination buttons' disabled states and card visibility
+        const combineRecipes = Array.isArray(p.participation.combine_recipes) ? p.participation.combine_recipes : [];
+        const forgeItems = document.querySelectorAll('.sigil-combine-section .vault-item');
+        let visibleForgeCount = 0;
+        forgeItems.forEach((item) => {
+            const btn = item.querySelector('button');
+            if (!btn) return;
+            const onclick = btn.getAttribute('onclick') || '';
+            const match = onclick.match(/combineSigil\((\d+)\)/);
+            if (!match) return;
+            const fromTier = parseInt(match[1], 10);
+            const recipe = combineRecipes.find(r => r.from_tier === fromTier);
+            const canCombine = !!(recipe && recipe.can_combine);
+            item.style.display = canCombine ? '' : 'none';
+            if (canCombine) {
+                btn.disabled = isBlackout;
+                visibleForgeCount++;
+            }
+        });
+        const forgeEmpty = document.querySelector('.sigil-combine-section .panel-info');
+        if (forgeEmpty) forgeEmpty.style.display = visibleForgeCount === 0 ? '' : 'none';
 
         // Re-render the active boosts panel with fresh data from the latest poll
         this.renderActiveBoosts();
@@ -805,8 +830,6 @@ const TMC = {
                     <!-- Lock-In Panel -->
                     <div class="action-panel panel-lockin">
                         <h3>Lock-In</h3>
-                        <p class="panel-info">Exit the season early. T1–T5 Sigils are refunded to Seasonal Stars. All Seasonal Stars then convert to Global Stars at <strong>65% (floor)</strong>. T6 Sigils are destroyed with no refund.</p>
-                        <p class="panel-warning">This will destroy all your Coins, Sigils, and Boosts. This action is irreversible.</p>
                         <button class="btn btn-danger btn-lg" onclick="TMC.confirmLockIn()" 
                             ${!p.can_lock_in || isBlackout ? 'disabled' : ''}>
                             Lock-In (${this.formatNumber(part.seasonal_stars)} Stars)
