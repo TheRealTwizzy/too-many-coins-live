@@ -62,11 +62,14 @@ class Database {
             }
 
             $existing = $this->fetch(
-                'SELECT checksum FROM schema_migrations WHERE migration_name = ?',
+                'SELECT checksum, status FROM schema_migrations WHERE migration_name = ?',
                 [$migrationName]
             );
 
             if ($existing) {
+                // Already recorded (applied or previously failed) – do not retry.
+                // A previously-failed migration must be replaced by a new migration file;
+                // editing the same file will trigger a checksum warning instead of a retry.
                 if (($existing['checksum'] ?? '') !== $checksum) {
                     error_log('Migration checksum changed for ' . $migrationName . '. Create a new migration filename for new patches.');
                 }
@@ -81,12 +84,23 @@ class Database {
             try {
                 $this->pdo->exec($sql);
                 $this->query(
-                    'INSERT INTO schema_migrations (migration_name, checksum) VALUES (?, ?)',
-                    [$migrationName, $checksum]
+                    'INSERT INTO schema_migrations (migration_name, checksum, status) VALUES (?, ?, ?)',
+                    [$migrationName, $checksum, 'applied']
                 );
             } catch (Throwable $e) {
-                // Keep runtime online; migration can be fixed and re-attempted on next startup.
                 error_log('Failed applying migration ' . $migrationName . ': ' . $e->getMessage());
+                // Record the failure so this migration is not retried on every subsequent
+                // request/worker-spawn, preventing log-spam and gameplay-path interference.
+                // To fix: create a new migration file with corrected SQL.
+                try {
+                    $this->query(
+                        'INSERT IGNORE INTO schema_migrations (migration_name, checksum, status) VALUES (?, ?, ?)',
+                        [$migrationName, $checksum, 'failed']
+                    );
+                } catch (Throwable $recordErr) {
+                    // If we cannot record the failure (e.g. table not ready), log and move on.
+                    error_log('Could not record migration failure for ' . $migrationName . ': ' . $recordErr->getMessage());
+                }
                 continue;
             }
         }
@@ -114,9 +128,23 @@ class Database {
                 id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 migration_name VARCHAR(255) NOT NULL UNIQUE,
                 checksum CHAR(64) NOT NULL,
+                status VARCHAR(16) NOT NULL DEFAULT 'applied',
                 applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB"
         );
+
+        // Backfill the status column on pre-existing deployments that created this
+        // table before the column was added.
+        $col = $this->fetch(
+            "SELECT 1 AS found FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'schema_migrations' AND COLUMN_NAME = 'status'",
+            [DB_NAME]
+        );
+        if (!$col) {
+            $this->pdo->exec(
+                "ALTER TABLE schema_migrations ADD COLUMN status VARCHAR(16) NOT NULL DEFAULT 'applied'"
+            );
+        }
     }
 
     private function getAutoMigrationFiles() {

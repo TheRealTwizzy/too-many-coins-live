@@ -102,6 +102,35 @@ Guidelines:
 
 - Add new DB changes as new `migration_*.sql` files (do not edit already-applied files).
 - Keep auto-applied migrations idempotent where possible.
+- Write migrations using MySQL 5.7+ compatible syntax. Avoid `ADD COLUMN IF NOT EXISTS` (supported only on some MySQL 8.x variants). Use stored procedures with `INFORMATION_SCHEMA` guards instead (see existing `migration_20260329b_*_compat.sql` files for the pattern).
+
+### Failure-loop guard
+
+When a migration fails, the runtime records it in `schema_migrations` with `status='failed'`.
+Subsequent requests skip that migration entry, preventing repeated log-spam and interference with economy/tick paths.
+**To remediate a failed migration:** create a new migration file with a corrected SQL approach; do not edit the original file (checksum immutability).
+
+### Production recommendation
+
+**Recommended for production:** run migrations as a one-time controlled step during deployment (not on every API request):
+
+```
+TMC_AUTO_SQL_MIGRATIONS=false
+```
+
+Then apply pending migrations manually:
+
+```bash
+mysql -u USER -p DB_NAME < migration_YYYYMMDD_name.sql
+```
+
+Or use the init script for a full re-run:
+
+```bash
+php init_db.php
+```
+
+Leave `TMC_AUTO_SQL_MIGRATIONS=true` (default) only in dev/staging environments where convenience outweighs caution. In production, a failed migration with `true` will be silently recorded as failed; operators must check `schema_migrations` for `status='failed'` rows.
 
 Disable auto-migrations only if needed:
 
