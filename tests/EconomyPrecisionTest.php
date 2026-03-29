@@ -63,8 +63,8 @@ class EconomyPrecisionTest extends TestCase
         $tierOneConditional = SIGIL_TIER_ODDS[1] / FP_SCALE;
         $effectivePercent = $basePercent * $tierOneConditional;
 
-        // T1 target: 2.5%; denominator 13 gives ~7.69% × 333333/1000000 ≈ 2.56%
-        $this->assertEqualsWithDelta(2.5, $effectivePercent, 0.1);
+        // T1 target: 8.75%; denominator 8 gives ~12.5% × 700000/1000000 ≈ 8.75%
+        $this->assertEqualsWithDelta(8.75, $effectivePercent, 0.1);
     }
 
     public function testSigilTierDropRatesScaleFromT1ToT5(): void
@@ -73,9 +73,9 @@ class EconomyPrecisionTest extends TestCase
         $this->assertArrayHasKey(1, SIGIL_TIER_DROP_RATES);
         $this->assertArrayHasKey(5, SIGIL_TIER_DROP_RATES);
 
-        // T1 must be 2.50% and T5 must be 0.50%
-        $this->assertSame(250, SIGIL_TIER_DROP_RATES[1]); // 2.50% in parts-per-10000
-        $this->assertSame(50,  SIGIL_TIER_DROP_RATES[5]); // 0.50% in parts-per-10000
+        // T1 must be 8.75% (875/10000) and T5 must be 0.06% (6/10000)
+        $this->assertSame(875, SIGIL_TIER_DROP_RATES[1]); // 8.75% in parts-per-10000
+        $this->assertSame(6,   SIGIL_TIER_DROP_RATES[5]); // 0.06% in parts-per-10000
 
         // Rates must be strictly descending T1 → T5
         for ($tier = 1; $tier < 5; $tier++) {
@@ -196,5 +196,42 @@ class EconomyPrecisionTest extends TestCase
         $this->assertSame(0, $result['sigil_refund_stars']);
         $this->assertSame(0, $result['total_seasonal_stars']);
         $this->assertSame(0, $result['global_stars_gained']);
+    }
+
+    public function testLowerTierSigilsDropMoreFrequentlyThanHigherTiers(): void
+    {
+        // T1 should dominate conditional drop odds (target: 70%)
+        $this->assertGreaterThan(
+            500000,
+            SIGIL_TIER_ODDS[1],
+            'T1 must account for more than 50% of conditional drops to sustain boost activity.'
+        );
+
+        // Effective drop rate ordering: T1 > T2 > T3 > T4 > T5
+        $basePercent = 100.0 / Economy::sigilDropRateForPower(0);
+        $prevEffective = $basePercent * (SIGIL_TIER_ODDS[1] / FP_SCALE);
+        $this->assertGreaterThan(0.0, $prevEffective, 'T1 effective drop rate must be positive.');
+        for ($tier = 2; $tier <= 5; $tier++) {
+            $effective = $basePercent * (SIGIL_TIER_ODDS[$tier] / FP_SCALE);
+            $this->assertLessThan(
+                $prevEffective,
+                $effective,
+                sprintf('T%d effective drop rate must be lower than T%d.', $tier, $tier - 1)
+            );
+            $prevEffective = $effective;
+        }
+    }
+
+    public function testT1DropRateIsHighEnoughForActiveBoostPlay(): void
+    {
+        // With base drop rate 1-in-8 and T1 at 70%, effective T1 rate should
+        // exceed 5% per eligible tick so active players see regular replenishment.
+        $basePercent = 100.0 / Economy::sigilDropRateForPower(0);
+        $t1Effective = $basePercent * (SIGIL_TIER_ODDS[1] / FP_SCALE);
+        $this->assertGreaterThan(
+            5.0,
+            $t1Effective,
+            'T1 effective drop rate should exceed 5% per eligible tick for active-play viability.'
+        );
     }
 }

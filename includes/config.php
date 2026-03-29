@@ -56,16 +56,16 @@ define('HOARDING_WINDOW_TICKS', ticks_from_real_seconds(86400));  // 24 real hou
 define('MIN_PARTICIPATION_TICKS', 1);
 
 // Sigil drops
-// Per-tier effective drop rates at zero sigil power (parts per 10,000; T1=2.50% down to T5=0.50%)
+// Per-tier effective drop rates at zero sigil power (parts per 10,000; T1=8.75% down to T5=0.06%)
 define('SIGIL_TIER_DROP_RATES', [
-    1 => 250,  // 2.50%
-    2 => 200,  // 2.00%
-    3 => 150,  // 1.50%
-    4 => 100,  // 1.00%
-    5 =>  50,  // 0.50%
+    1 => 875,  // 8.75%
+    2 => 250,  // 2.50%
+    3 => 100,  // 1.00%
+    4 =>  19,  // 0.19%
+    5 =>   6,  // 0.06%
 ]);
-define('SIGIL_DROP_RATE', 13);           // 1 in 13 (~7.69% combined base drop rate at 0 sigil power)
-define('SIGIL_DROP_RATE_MAX_POWER', 26); // 1 in 26 (~3.85% combined drop rate at full sigil power)
+define('SIGIL_DROP_RATE', 8);            // 1 in 8 (~12.5% combined base drop rate at 0 sigil power)
+define('SIGIL_DROP_RATE_MAX_POWER', 16); // 1 in 16 (~6.25% combined drop rate at full sigil power)
 define('SIGIL_PITY_TICKS', ticks_from_real_seconds(120000));
 define('SIGIL_MAX_DROPS_WINDOW', 8);
 define('SIGIL_DROP_WINDOW_TICKS', ticks_from_real_seconds(86400));
@@ -89,11 +89,11 @@ define('SIGIL_INVENTORY_ADJ_MAX_STEPS', 10);   // Cap: maximum 10 triggers (≤1
 //   denominator by 1, capped at SIGIL_BOOST_DROP_RATE_MAX_PENALTY steps.
 //   SIGIL_BOOST_DROP_RATE_FLOOR / CEILING clamp the final denominator so drops remain
 //   viable in all states and never become excessively rare.
-//   Example: base denominator 13, 40% boost → 13 + 2 = 15 (~6.67% vs ~7.69% base rate).
+//   Example: base denominator 8, 40% boost → 8 + 2 = 10 (~10.0% vs ~12.5% base rate).
 define('SIGIL_BOOST_DROP_RATE_STEP_FP',    200000); // 20% boost per denominator-penalty step
-define('SIGIL_BOOST_DROP_RATE_MAX_PENALTY',      4); // Maximum denominator increase from boost activity
-define('SIGIL_BOOST_DROP_RATE_FLOOR',            8); // Absolute minimum denominator (most generous rate)
-define('SIGIL_BOOST_DROP_RATE_CEILING',         32); // Absolute maximum denominator (most restrictive rate)
+define('SIGIL_BOOST_DROP_RATE_MAX_PENALTY',      3); // Maximum denominator increase from boost activity
+define('SIGIL_BOOST_DROP_RATE_FLOOR',            5); // Absolute minimum denominator (most generous rate)
+define('SIGIL_BOOST_DROP_RATE_CEILING',         20); // Absolute maximum denominator (most restrictive rate)
 
 // Inventory-based uplift (empty/low inventory => more drops):
 //   When a player holds fewer than SIGIL_INVENTORY_UPLIFT_THRESHOLD sigils of a given
@@ -111,18 +111,18 @@ define('SIGIL_INVENTORY_UPLIFT_MAX_STEPS',      3); // Cap: at most 3 uplift ste
 // ordering (T1 >= T2 >= T3 >= T4 >= T5) is enforced so lower-tier sigils can never
 // become rarer than higher-tier sigils.
 define('SIGIL_TIER_ODDS_MIN', [
-    1 => 200000,  // T1 (Common)    – never below 20% of conditional drops
-    2 => 100000,  // T2 (Uncommon)  – never below 10%
-    3 =>  75000,  // T3 (Rare)      – never below  7.5%
-    4 =>  50000,  // T4 (Epic)      – never below  5%
-    5 =>  25000,  // T5 (Legendary) – never below  2.5%
+    1 => 500000,  // T1 (Common)    – never below 50% of conditional drops
+    2 =>  80000,  // T2 (Uncommon)  – never below  8%
+    3 =>  30000,  // T3 (Rare)      – never below  3%
+    4 =>   5000,  // T4 (Epic)      – never below  0.5%
+    5 =>   2000,  // T5 (Legendary) – never below  0.2%
 ]);
 define('SIGIL_TIER_ODDS_MAX', [
-    1 => 600000,  // T1 – never above 60% of conditional drops
-    2 => 500000,  // T2 – never above 50%
-    3 => 400000,  // T3 – never above 40%
-    4 => 300000,  // T4 – never above 30%
-    5 => 200000,  // T5 – never above 20%
+    1 => 850000,  // T1 – never above 85% of conditional drops
+    2 => 350000,  // T2 – never above 35%
+    3 => 150000,  // T3 – never above 15%
+    4 =>  30000,  // T4 – never above  3%
+    5 =>  15000,  // T5 – never above  1.5%
 ]);
 
 // Sigil progression and crafting
@@ -138,11 +138,11 @@ define('SIGIL_COMBINE_RECIPES', [
 // Tier-odds scaling by sigil power. Tier 6 is intentionally excluded from RNG drops.
 define('SIGIL_POWER_FULL_SHIFT', 40);
 define('SIGIL_TIER_ODDS_MAX_POWER', [
-    1 => 333333,
-    2 => 266667,
-    3 => 200000,
-    4 => 133333,
-    5 =>  66667,
+    1 => 700000,
+    2 => 200000,
+    3 =>  80000,
+    4 =>  15000,
+    5 =>   5000,
 ]);
 
 // Freeze mechanics (Tier 6 sigil action)
@@ -156,13 +156,13 @@ define('BOOST_GUARANTEED_FLOOR_STEP_COINS', 1);
 define('BOOST_GUARANTEED_FLOOR_CAP_COINS', 0);
 
 // Sigil tier odds (fixed-point, sum = 1,000,000)
-// Proportional to SIGIL_TIER_DROP_RATES: T1=2.5%, T2=2.0%, T3=1.5%, T4=1.0%, T5=0.5% of total 7.5%
+// Proportional to SIGIL_TIER_DROP_RATES: T1=8.75%, T2=2.5%, T3=1.0%, T4=0.19%, T5=0.06% of total 12.5%
 define('SIGIL_TIER_ODDS', [
-    1 => 333333,  // ~2.56% effective T1 at 0 sigil power (≈ 2.5% target)
-    2 => 266667,  // ~2.05% effective T2
-    3 => 200000,  // ~1.54% effective T3
-    4 => 133333,  // ~1.03% effective T4
-    5 =>  66667,  // ~0.51% effective T5 (≈ 0.5% target)
+    1 => 700000,  // ~8.75% effective T1 at 0 sigil power (70% of all drops)
+    2 => 200000,  // ~2.50% effective T2 (20% of all drops)
+    3 =>  80000,  // ~1.00% effective T3  (8% of all drops)
+    4 =>  15000,  // ~0.19% effective T4 (1.5% of all drops)
+    5 =>   5000,  // ~0.06% effective T5 (0.5% of all drops)
 ]);
 
 // Participation bonus

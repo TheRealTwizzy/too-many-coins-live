@@ -40,7 +40,7 @@ Guaranteed floor policy (hybrid scaling):
 
 ## Sigil Drop System
 
-- **Base Rate**: 1 in 750 per eligible tick (1-minute ticks)
+- **Base Rate**: 1 in 8 per eligible tick (~12.5% combined across all tiers; T1: ~8.75%, T2: ~2.5%, T3: ~1.0%, T4: ~0.19%, T5: ~0.06%)
 - **Eligibility**: Must be Online + Participating + Active (not Idle)
 - **Pity Timer**: Guaranteed Tier I drop after 2,000 eligible ticks with no drop
 - **Throttle**: Maximum 8 drops per rolling 1,440-tick window
