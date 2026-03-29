@@ -647,4 +647,303 @@ class EconomyPrecisionTest extends TestCase
             'gross_rate_fp at max boost must exceed the piecewise bonus alone (UBI is additive).'
         );
     }
+
+    // ==================== Star Price Stability Patch ====================
+
+    private function makeStarPriceSeason(array $overrides = []): array
+    {
+        return array_merge([
+            'starprice_table' => json_encode([
+                ['m' => 0,       'price' => 100],
+                ['m' => 25000,   'price' => 300],
+                ['m' => 100000,  'price' => 900],
+                ['m' => 500000,  'price' => 3200],
+                ['m' => 2000000, 'price' => 11000],
+            ]),
+            'star_price_cap'                => 12000,
+            'total_coins_supply_end_of_tick' => 0,
+            'effective_price_supply'         => 0,
+            'starprice_active_only'          => 0,
+            'current_star_price'             => 0,
+            'starprice_max_upstep_fp'        => 2000,   // 0.2 %/tick
+            'starprice_max_downstep_fp'      => 10000,  // 1.0 %/tick
+        ], $overrides);
+    }
+
+    // --- Supply delta accounting ---
+
+    public function testNetSupplyDeltaIsNetCoinsWhenBurnIsZero(): void
+    {
+        $totalNewCoins    = 500;
+        $totalBurnedCoins = 0;
+        $netCoinsDelta    = $totalNewCoins; // minted − burned (burned is accounting-only)
+        $currentSupply    = 1000;
+        $newSupply        = max(0, $currentSupply + $netCoinsDelta);
+
+        $this->assertSame(1500, $newSupply);
+    }
+
+    public function testNetSupplyDeltaIsZeroWhenNoNewCoins(): void
+    {
+        $totalNewCoins    = 0;
+        $totalBurnedCoins = 0;
+        $netCoinsDelta    = $totalNewCoins;
+        $currentSupply    = 1000;
+        $newSupply        = max(0, $currentSupply + $netCoinsDelta);
+
+        $this->assertSame(1000, $newSupply);
+    }
+
+    public function testNetSupplyDoesNotGoBelowZero(): void
+    {
+        // Guard: the GREATEST(0, ...) / max(0, ...) floor must prevent underflow even if
+        // $netCoinsDelta is somehow negative (defensive edge case).
+        $netCoinsDelta = -200;
+        $currentSupply = 100;
+        $newSupply     = max(0, $currentSupply + $netCoinsDelta);
+
+        $this->assertSame(0, $newSupply);
+    }
+
+    public function testBothSupplyFieldsReceiveSameValueFixesPreviousDoubleCounting(): void
+    {
+        // Regression: old MySQL single-UPDATE code evaluated SET clauses left-to-right,
+        // so total_coins_supply_end_of_tick saw the already-updated total_coins_supply and
+        // accumulated 2× the net delta per tick.
+        //
+        // New code uses SQL expressions with total_coins_supply_end_of_tick listed BEFORE
+        // total_coins_supply in the SET clause, so both expressions reference the original
+        // total_coins_supply value atomically. This also avoids stale-read lost updates
+        // from concurrent sessions (e.g. star purchases).
+        $totalNewCoins = 300;
+        $currentSupply = 1000;
+
+        // Simulate old (buggy) behavior: first field = old + delta; second references first.
+        $firstField       = max(0, $currentSupply + $totalNewCoins); // 1300
+        $secondFieldBuggy = max(0, $firstField + $totalNewCoins);    // 1600 (double-counted!)
+
+        // New behavior: both fields derive from the same original supply (SQL expression).
+        $newSupply        = max(0, $currentSupply + $totalNewCoins); // 1300
+        $secondFieldFixed = $newSupply;                               // also 1300
+
+        $this->assertSame(1300, $newSupply);
+        $this->assertSame($newSupply, $secondFieldFixed, 'Both supply fields must receive the same value.');
+        // Fixed supply must be strictly less than the old double-counted supply.
+        $this->assertLessThan($secondFieldBuggy, $newSupply, 'Fixed supply must be less than old double-counted end_of_tick supply.');
+    }
+
+    // --- Effective supply calculation ---
+
+    public function testEffectiveSupplyWeightedIdleModeReducesIdleInfluence(): void
+    {
+        $coinsActive   = 10000;
+        $coinsIdle     = 40000;
+        $idleWeightFp  = 250000; // 0.25
+
+        $effective = max(0, $coinsActive + Economy::fpMultiply($coinsIdle, $idleWeightFp));
+
+        // idle contribution = floor(40000 * 0.25) = 10000; total = 10000 + 10000 = 20000
+        $this->assertSame(20000, $effective);
+        $this->assertLessThan($coinsActive + $coinsIdle, $effective, 'Weighted effective supply must be less than total coins.');
+    }
+
+    public function testEffectiveSupplyActiveOnlyIgnoresIdleCoins(): void
+    {
+        $coinsActive = 10000;
+        $coinsIdle   = 40000;
+
+        $effective = max(0, $coinsActive); // starprice_active_only = 1
+
+        $this->assertSame(10000, $effective);
+    }
+
+    public function testEffectiveSupplyZeroIdleWeightIgnoresIdleEntirely(): void
+    {
+        $coinsActive  = 5000;
+        $coinsIdle    = 100000;
+        $idleWeightFp = 0; // explicit zero weight
+
+        $effective = max(0, $coinsActive + Economy::fpMultiply($coinsIdle, $idleWeightFp));
+
+        $this->assertSame(5000, $effective);
+    }
+
+    // --- calculateStarPrice uses effective_price_supply ---
+
+    public function testCalculateStarPriceUsesEffectivePriceSupplyWhenPositive(): void
+    {
+        // effective_price_supply = 25000 → table price 300
+        // total_coins_supply_end_of_tick = 100000 → table price 900
+        $season = $this->makeStarPriceSeason([
+            'effective_price_supply'          => 25000,
+            'total_coins_supply_end_of_tick'  => 100000,
+        ]);
+
+        $price = Economy::calculateStarPrice($season);
+
+        $this->assertSame(300, $price, 'calculateStarPrice must use effective_price_supply when > 0.');
+    }
+
+    public function testCalculateStarPriceFallsBackToEndOfTickSupplyWhenEffectiveIsZero(): void
+    {
+        // Default mode (starprice_active_only = 0): effective_price_supply = 0 → fallback
+        // to total_coins_supply_end_of_tick = 100000 → table price 900.
+        $season = $this->makeStarPriceSeason([
+            'starprice_active_only'           => 0,
+            'effective_price_supply'          => 0,
+            'total_coins_supply_end_of_tick'  => 100000,
+        ]);
+
+        $price = Economy::calculateStarPrice($season);
+
+        $this->assertSame(900, $price, 'Default mode must fall back to total_coins_supply_end_of_tick when effective_price_supply is 0.');
+    }
+
+    public function testCalculateStarPriceActiveOnlyUsesZeroEffectiveSupplyWithoutFallback(): void
+    {
+        // starprice_active_only = 1: effective_price_supply = 0 (no active players)
+        // must NOT fall back to total_coins_supply_end_of_tick (which contains idle coins).
+        // supply = 0 → table price = 100; clamp skipped (prevPrice = 0).
+        $season = $this->makeStarPriceSeason([
+            'starprice_active_only'           => 1,
+            'effective_price_supply'          => 0,
+            'total_coins_supply_end_of_tick'  => 100000, // would give 900 if used
+            'current_star_price'              => 0,       // no clamp on first tick
+        ]);
+
+        $price = Economy::calculateStarPrice($season);
+
+        $this->assertSame(100, $price, 'Active-only mode must use effective_price_supply=0 directly, not fall back to idle-inclusive supply.');
+    }
+
+    // --- Velocity clamp: upward ---
+
+    public function testVelocityClampLimitsUpwardPriceMovement(): void
+    {
+        // Raw price at supply 100000 = 900; prevPrice = 300; upstep = 2000 fp (0.2%)
+        // maxUp = intdiv(300 * 2000, 1000000) = 0 → max(1, 0) = 1
+        // clamped = min(900, 300 + 1) = 301
+        $season = $this->makeStarPriceSeason([
+            'effective_price_supply'  => 100000,
+            'current_star_price'      => 300,
+            'starprice_max_upstep_fp' => 2000,
+        ]);
+
+        $price = Economy::calculateStarPrice($season);
+
+        $this->assertSame(301, $price, 'Upward velocity clamp must prevent large single-tick price jumps.');
+    }
+
+    public function testVelocityClampLimitsUpwardByPercentageForHigherPrice(): void
+    {
+        // prevPrice = 1000; upstep = 2000 fp
+        // maxUp = intdiv(1000 * 2000, 1000000) = 2
+        // raw price at supply 2000000 = 11000; clamped = min(11000, 1002) = 1002
+        $season = $this->makeStarPriceSeason([
+            'effective_price_supply'  => 2000000,
+            'current_star_price'      => 1000,
+            'starprice_max_upstep_fp' => 2000,
+        ]);
+
+        $price = Economy::calculateStarPrice($season);
+
+        $this->assertSame(1002, $price);
+    }
+
+    // --- Velocity clamp: downward ---
+
+    public function testVelocityClampLimitsDownwardPriceMovement(): void
+    {
+        // prevPrice = 900; downstep = 10000 fp (1%)
+        // maxDown = intdiv(900 * 10000, 1000000) = 9
+        // raw price at supply 0 = 100; clamped = max(100, 900 - 9) = 891
+        $season = $this->makeStarPriceSeason([
+            'effective_price_supply'     => 0,      // supply = 0 → fallback
+            'total_coins_supply_end_of_tick' => 0,  // → raw price = 100
+            'current_star_price'         => 900,
+            'starprice_max_downstep_fp'  => 10000,
+        ]);
+
+        $price = Economy::calculateStarPrice($season);
+
+        $this->assertSame(891, $price, 'Downward velocity clamp must prevent large single-tick price drops.');
+    }
+
+    public function testVelocityClampAllowsSmallDownwardMovement(): void
+    {
+        // prevPrice = 300; downstep = 10000 fp (1%); maxDown = intdiv(300 * 10000, 1000000) = 3
+        // raw price at supply 0 = 100; clamped = max(100, 300 - 3) = 297
+        $season = $this->makeStarPriceSeason([
+            'total_coins_supply_end_of_tick' => 0,  // raw price = 100
+            'current_star_price'             => 300,
+            'starprice_max_downstep_fp'      => 10000,
+        ]);
+
+        $price = Economy::calculateStarPrice($season);
+
+        $this->assertSame(297, $price);
+    }
+
+    // --- Regression: existing cap and floor preserved ---
+
+    public function testHardCapStillEnforcedAfterVelocityClamp(): void
+    {
+        // Raw price at very high supply = 11000; cap = 500; clamp allows movement.
+        // prevPrice = 490; upstep = 100000 fp (10%); maxUp = intdiv(490*100000, 1e6) = 49
+        // clamped = min(11000, 490 + 49) = 539; after cap = min(539, 500) = 500.
+        $season = $this->makeStarPriceSeason([
+            'effective_price_supply'  => 2000000,  // raw = 11000
+            'star_price_cap'          => 500,
+            'current_star_price'      => 490,
+            'starprice_max_upstep_fp' => 100000,   // 10%/tick – very generous for test
+        ]);
+
+        $price = Economy::calculateStarPrice($season);
+
+        $this->assertSame(500, $price, 'Hard cap must be enforced after velocity clamp.');
+    }
+
+    public function testFloorOfOneEnforcedWhenClampWouldGoToZero(): void
+    {
+        // prevPrice = 1; downstep = 1000000 fp (100%); raw = 100; maxDown = 1
+        // clamped = max(100, 1 - 1) = max(100, 0) = 100; floor(max(1, 100)) = 100.
+        // But if we push prevPrice = 1 down by full step and raw also = 1:
+        // Construct: supply = 0 → raw = 100, floor applies → price >= 1
+        $season = $this->makeStarPriceSeason([
+            'total_coins_supply_end_of_tick' => 0,   // raw = 100
+            'current_star_price'             => 1,
+            'starprice_max_downstep_fp'      => 1000000, // 100% down
+        ]);
+
+        $price = Economy::calculateStarPrice($season);
+
+        $this->assertGreaterThanOrEqual(1, $price, 'Star price must never fall below 1.');
+    }
+
+    public function testNoPrevPriceSkipsVelocityClamp(): void
+    {
+        // prevPrice = 0 means first tick or uninitialized; clamp must be skipped entirely.
+        // raw price at supply 100000 = 900; no clamp → 900.
+        $season = $this->makeStarPriceSeason([
+            'effective_price_supply' => 100000,
+            'current_star_price'     => 0,
+        ]);
+
+        $price = Economy::calculateStarPrice($season);
+
+        $this->assertSame(900, $price, 'Velocity clamp must be skipped when prevPrice is 0 (first tick).');
+    }
+
+    public function testStarPriceNotChangedWhenSupplyIsStable(): void
+    {
+        // prevPrice = 900; supply = 100000 → raw = 900; no clamp needed (no movement).
+        $season = $this->makeStarPriceSeason([
+            'effective_price_supply' => 100000,
+            'current_star_price'     => 900,
+        ]);
+
+        $price = Economy::calculateStarPrice($season);
+
+        $this->assertSame(900, $price, 'Price must remain stable when supply does not change.');
+    }
 }

@@ -90,6 +90,11 @@ CREATE TABLE IF NOT EXISTS seasons (
     hoarding_idle_multiplier_fp INT NOT NULL DEFAULT 1250000,
     starprice_table JSON NOT NULL,
     star_price_cap BIGINT NOT NULL DEFAULT 10000,
+    -- Active-weighted pricing config (fixed-point, FP_SCALE = 1,000,000)
+    starprice_idle_weight_fp INT NOT NULL DEFAULT 250000,   -- 0.25: idle coins count 25% toward price
+    starprice_active_only TINYINT(1) NOT NULL DEFAULT 0,   -- 1: ignore idle coins entirely for pricing
+    starprice_max_upstep_fp INT NOT NULL DEFAULT 2000,     -- ~0.2%/tick max upward price movement
+    starprice_max_downstep_fp INT NOT NULL DEFAULT 10000,  -- ~1.0%/tick max downward price movement
     trade_fee_tiers JSON NOT NULL,
     trade_min_fee_coins BIGINT NOT NULL DEFAULT 10,
     -- Vault config
@@ -98,6 +103,10 @@ CREATE TABLE IF NOT EXISTS seasons (
     current_star_price BIGINT NOT NULL DEFAULT 100,
     total_coins_supply BIGINT NOT NULL DEFAULT 0,
     total_coins_supply_end_of_tick BIGINT NOT NULL DEFAULT 0,
+    -- Pricing telemetry (updated each tick before star-price recalculation)
+    coins_active_total BIGINT NOT NULL DEFAULT 0,          -- sum of coins held by Active players
+    coins_idle_total BIGINT NOT NULL DEFAULT 0,            -- sum of coins held by Idle players
+    effective_price_supply BIGINT NOT NULL DEFAULT 0,      -- supply used for star-price calculation
     -- Tick tracking
     last_processed_tick BIGINT NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

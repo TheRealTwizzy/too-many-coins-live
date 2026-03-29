@@ -179,11 +179,15 @@ class GameTime {
                      hoarding_tier1_excess_cap, hoarding_tier2_excess_cap,
                      hoarding_tier1_rate_hourly_fp, hoarding_tier2_rate_hourly_fp, hoarding_tier3_rate_hourly_fp,
                      hoarding_sink_cap_ratio_fp, hoarding_idle_multiplier_fp,
-                     starprice_table, star_price_cap, trade_fee_tiers, trade_min_fee_coins,
+                     starprice_table, star_price_cap,
+                     starprice_idle_weight_fp, starprice_active_only,
+                     starprice_max_upstep_fp, starprice_max_downstep_fp,
+                     trade_fee_tiers, trade_min_fee_coins,
                      vault_config, current_star_price, last_processed_tick)
                      VALUES (?, ?, ?, ?, 'Scheduled', 30, 250000, 1, ?, ?, 18, 90000,
                      0, 12, 20000, 50000, 200000, 200, 500, 1000, 350000, 1250000,
-                     ?, 12000, ?, 10, ?, 100, ?)",
+                     ?, 12000, 250000, 0, 2000, 10000,
+                     ?, 10, ?, 100, ?)",
                     [$startTime, $endTime, $blackoutTime, $seed,
                      $inflationTable, HOARDING_WINDOW_TICKS, $starpriceTable, $tradeFeeTiers, $vaultConfig, $startTime]
                 );
