@@ -663,6 +663,7 @@ class EconomyPrecisionTest extends TestCase
             'star_price_cap'                => 12000,
             'total_coins_supply_end_of_tick' => 0,
             'effective_price_supply'         => 0,
+            'starprice_active_only'          => 0,
             'current_star_price'             => 0,
             'starprice_max_upstep_fp'        => 2000,   // 0.2 %/tick
             'starprice_max_downstep_fp'      => 10000,  // 1.0 %/tick
@@ -710,22 +711,25 @@ class EconomyPrecisionTest extends TestCase
         // so total_coins_supply_end_of_tick saw the already-updated total_coins_supply and
         // accumulated 2× the net delta per tick.
         //
-        // New code computes $newSupply in PHP and passes the same value to both fields,
-        // so they are always identical regardless of MySQL evaluation order.
+        // New code uses SQL expressions with total_coins_supply_end_of_tick listed BEFORE
+        // total_coins_supply in the SET clause, so both expressions reference the original
+        // total_coins_supply value atomically. This also avoids stale-read lost updates
+        // from concurrent sessions (e.g. star purchases).
         $totalNewCoins = 300;
         $currentSupply = 1000;
 
         // Simulate old (buggy) behavior: first field = old + delta; second references first.
-        $firstField  = max(0, $currentSupply + $totalNewCoins); // 1300
-        $secondFieldBuggy = max(0, $firstField + $totalNewCoins); // 1600 (double-counted!)
+        $firstField       = max(0, $currentSupply + $totalNewCoins); // 1300
+        $secondFieldBuggy = max(0, $firstField + $totalNewCoins);    // 1600 (double-counted!)
 
-        // New behavior: both fields receive the pre-computed value.
-        $newSupply = max(0, $currentSupply + $totalNewCoins); // 1300
-        $secondFieldFixed = $newSupply;                        // also 1300
+        // New behavior: both fields derive from the same original supply (SQL expression).
+        $newSupply        = max(0, $currentSupply + $totalNewCoins); // 1300
+        $secondFieldFixed = $newSupply;                               // also 1300
 
         $this->assertSame(1300, $newSupply);
         $this->assertSame($newSupply, $secondFieldFixed, 'Both supply fields must receive the same value.');
-        $this->assertGreaterThan($newSupply, $secondFieldBuggy, 'Old code would have produced a higher end_of_tick supply.');
+        // Fixed supply must be strictly less than the old double-counted supply.
+        $this->assertLessThan($secondFieldBuggy, $newSupply, 'Fixed supply must be less than old double-counted end_of_tick supply.');
     }
 
     // --- Effective supply calculation ---
@@ -782,15 +786,34 @@ class EconomyPrecisionTest extends TestCase
 
     public function testCalculateStarPriceFallsBackToEndOfTickSupplyWhenEffectiveIsZero(): void
     {
-        // effective_price_supply = 0 → fallback to total_coins_supply_end_of_tick = 100000 → 900
+        // Default mode (starprice_active_only = 0): effective_price_supply = 0 → fallback
+        // to total_coins_supply_end_of_tick = 100000 → table price 900.
         $season = $this->makeStarPriceSeason([
+            'starprice_active_only'           => 0,
             'effective_price_supply'          => 0,
             'total_coins_supply_end_of_tick'  => 100000,
         ]);
 
         $price = Economy::calculateStarPrice($season);
 
-        $this->assertSame(900, $price, 'calculateStarPrice must fall back to total_coins_supply_end_of_tick when effective_price_supply is 0.');
+        $this->assertSame(900, $price, 'Default mode must fall back to total_coins_supply_end_of_tick when effective_price_supply is 0.');
+    }
+
+    public function testCalculateStarPriceActiveOnlyUsesZeroEffectiveSupplyWithoutFallback(): void
+    {
+        // starprice_active_only = 1: effective_price_supply = 0 (no active players)
+        // must NOT fall back to total_coins_supply_end_of_tick (which contains idle coins).
+        // supply = 0 → table price = 100; clamp skipped (prevPrice = 0).
+        $season = $this->makeStarPriceSeason([
+            'starprice_active_only'           => 1,
+            'effective_price_supply'          => 0,
+            'total_coins_supply_end_of_tick'  => 100000, // would give 900 if used
+            'current_star_price'              => 0,       // no clamp on first tick
+        ]);
+
+        $price = Economy::calculateStarPrice($season);
+
+        $this->assertSame(100, $price, 'Active-only mode must use effective_price_supply=0 directly, not fall back to idle-inclusive supply.');
     }
 
     // --- Velocity clamp: upward ---

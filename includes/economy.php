@@ -426,10 +426,21 @@ class Economy {
      */
     public static function calculateStarPrice($season, $totalCoinsEndOfTick = null) {
         if ($totalCoinsEndOfTick === null) {
-            $effectiveSupply = (int)($season['effective_price_supply'] ?? 0);
-            $totalCoinsEndOfTick = ($effectiveSupply > 0)
-                ? $effectiveSupply
-                : (int)$season['total_coins_supply_end_of_tick'];
+            $activeOnly = (int)($season['starprice_active_only'] ?? 0);
+            if ($activeOnly) {
+                // starprice_active_only = 1: use effective_price_supply unconditionally,
+                // even when it is 0 (no active players = 0 pricing pressure — do not fall
+                // back to total_coins_supply_end_of_tick which would re-introduce idle influence).
+                $totalCoinsEndOfTick = (int)($season['effective_price_supply'] ?? 0);
+            } else {
+                // Default (weighted-idle) mode: use effective_price_supply when > 0
+                // (i.e. after the first tick has populated it); fall back to
+                // total_coins_supply_end_of_tick for fresh seasons or backward compatibility.
+                $effectiveSupply = (int)($season['effective_price_supply'] ?? 0);
+                $totalCoinsEndOfTick = ($effectiveSupply > 0)
+                    ? $effectiveSupply
+                    : (int)$season['total_coins_supply_end_of_tick'];
+            }
         }
 
         $table = json_decode($season['starprice_table'], true);

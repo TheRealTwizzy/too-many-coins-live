@@ -222,28 +222,35 @@ class TickEngine {
             
             // Phase 6: Update season supply and star price.
             //
-            // Supply accounting fix: the previous implementation passed params
-            // ($totalNewCoins + $totalBurnedCoins) and $totalBurnedCoins to a single UPDATE
-            // SET that updated both total_coins_supply and total_coins_supply_end_of_tick.
-            // Due to MySQL's left-to-right SET evaluation, total_coins_supply_end_of_tick
-            // referenced the already-updated total_coins_supply, causing the net delta to
-            // be applied twice and end_of_tick supply to drift above the true supply each tick.
+            // Supply accounting: use atomic SQL expressions to avoid stale-read lost updates.
+            // A concurrent session (e.g. star purchase) may modify total_coins_supply between
+            // the pre-tick SELECT and this UPDATE; using SQL expressions (not PHP-computed
+            // values) ensures the delta is applied to the actual current row value.
             //
-            // Fix: compute final supply value in PHP so both fields receive the same value.
+            // Left-to-right SET evaluation trick: placing total_coins_supply_end_of_tick
+            // BEFORE total_coins_supply means both expressions reference total_coins_supply
+            // at its original (pre-UPDATE) value, so both fields receive the same derived
+            // result without double-applying the delta.
+            //
             // Net delta = $totalNewCoins (gross minted minus the sink already absorbed into
             // the net rate; $totalBurnedCoins is the accounting-only sink metric).
-            $grossMinted   = $totalNewCoins + $totalBurnedCoins; // used for traceability logging only
-            $netCoinsDelta = $totalNewCoins; // = grossMinted - totalBurnedCoins
-            $currentSupply = (int)$season['total_coins_supply'];
-            $newSupply     = max(0, $currentSupply + $netCoinsDelta);
+            $grossMinted   = $totalNewCoins + $totalBurnedCoins; // for trace logging only
+            $netCoinsDelta = $totalNewCoins;                      // = grossMinted - totalBurnedCoins
 
-            error_log(sprintf(
-                '[TMC][tick=%d][season=%d] supply: minted=%d burned=%d net_delta=%d new_supply=%d',
-                $gameTime, $seasonId, $grossMinted, $totalBurnedCoins, $netCoinsDelta, $newSupply
-            ));
+            // Optional detailed supply trace logging; enable by setting TMC_SUPPLY_TRACE=1 in the environment.
+            static $supplyTraceEnabled = null;
+            if ($supplyTraceEnabled === null) {
+                $supplyTraceEnabled = getenv('TMC_SUPPLY_TRACE') === '1';
+            }
+            if ($supplyTraceEnabled) {
+                error_log(sprintf(
+                    '[TMC][tick=%d][season=%d] supply: minted=%d burned=%d net_delta=%d',
+                    $gameTime, $seasonId, $grossMinted, $totalBurnedCoins, $netCoinsDelta
+                ));
+            }
 
             // Compute effective_price_supply for active-weighted pricing.
-            $activeOnly  = (int)($season['starprice_active_only']   ?? 0);
+            $activeOnly   = (int)($season['starprice_active_only']   ?? 0);
             $idleWeightFp = (int)($season['starprice_idle_weight_fp'] ?? 250000);
             if ($activeOnly) {
                 $effectivePriceSupply = max(0, $coinsActiveTotal);
@@ -253,14 +260,14 @@ class TickEngine {
 
             $db->query(
                 "UPDATE seasons SET
-                 total_coins_supply = ?,
-                 total_coins_supply_end_of_tick = ?,
+                 total_coins_supply_end_of_tick = GREATEST(0, total_coins_supply + ?),
+                 total_coins_supply = GREATEST(0, total_coins_supply + ?),
                  coins_active_total = ?,
                  coins_idle_total = ?,
                  effective_price_supply = ?,
                  last_processed_tick = ?
                  WHERE season_id = ?",
-                [$newSupply, $newSupply, $coinsActiveTotal, $coinsIdleTotal, $effectivePriceSupply, $gameTime, $seasonId]
+                [$netCoinsDelta, $netCoinsDelta, $coinsActiveTotal, $coinsIdleTotal, $effectivePriceSupply, $gameTime, $seasonId]
             );
             
             // Recalculate star price using updated season data (includes effective_price_supply
