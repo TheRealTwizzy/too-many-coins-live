@@ -1418,14 +1418,17 @@ const TMC = {
 
     getPlayerStatus(entry) {
         if (!entry.online_current) return 'Offline';
-        if (entry.lock_in_effect_tick != null) return 'Locked-In';
         return entry.activity_state || 'Offline';
     },
 
     renderPlayerStatusBadge(entry) {
         const status = this.getPlayerStatus(entry);
         const key = status.toLowerCase().replace(/[^a-z]+/g, '-');
-        return `<span class="status-dot status-dot-${key}" title="${status}"></span>`;
+        let badge = `<span class="status-dot status-dot-${key}" title="${status}"></span>`;
+        if (entry.lock_in_effect_tick != null) {
+            badge += ` <span class="status-dot status-dot-locked-in" title="Locked-In"></span>`;
+        }
+        return badge;
     },
 
     setLeaderboardMeta(title, subtitle) {
