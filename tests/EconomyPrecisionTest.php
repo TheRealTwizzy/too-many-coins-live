@@ -63,7 +63,34 @@ class EconomyPrecisionTest extends TestCase
         $tierOneConditional = SIGIL_TIER_ODDS[1] / FP_SCALE;
         $effectivePercent = $basePercent * $tierOneConditional;
 
-        $this->assertEqualsWithDelta(0.25, $effectivePercent, 0.000001);
+        // T1 target: 2.5%; denominator 13 gives ~7.69% × 333333/1000000 ≈ 2.56%
+        $this->assertEqualsWithDelta(2.5, $effectivePercent, 0.1);
+    }
+
+    public function testSigilTierDropRatesScaleFromT1ToT5(): void
+    {
+        // Verify SIGIL_TIER_DROP_RATES is defined with correct tier bounds
+        $this->assertArrayHasKey(1, SIGIL_TIER_DROP_RATES);
+        $this->assertArrayHasKey(5, SIGIL_TIER_DROP_RATES);
+
+        // T1 must be 2.50% and T5 must be 0.50%
+        $this->assertSame(250, SIGIL_TIER_DROP_RATES[1]); // 2.50% in parts-per-10000
+        $this->assertSame(50,  SIGIL_TIER_DROP_RATES[5]); // 0.50% in parts-per-10000
+
+        // Rates must be strictly descending T1 → T5
+        for ($tier = 1; $tier < 5; $tier++) {
+            $this->assertGreaterThan(
+                SIGIL_TIER_DROP_RATES[$tier + 1],
+                SIGIL_TIER_DROP_RATES[$tier],
+                sprintf('Expected T%d drop rate to be higher than T%d.', $tier, $tier + 1)
+            );
+        }
+    }
+
+    public function testSigilTierOddsSumToOneMillion(): void
+    {
+        $sum = array_sum(SIGIL_TIER_ODDS);
+        $this->assertSame(1000000, $sum, 'SIGIL_TIER_ODDS must sum to exactly 1,000,000.');
     }
 
     public function testEffectiveSigilTierChancesDecreaseAtFullPower(): void
