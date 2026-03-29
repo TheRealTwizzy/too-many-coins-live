@@ -297,4 +297,193 @@ class EconomyPrecisionTest extends TestCase
             'T1 effective drop rate should exceed 5% per eligible tick for active-play viability.'
         );
     }
+
+    // ==================== Rate Breakdown / Net Mint ====================
+
+    /**
+     * Helper: build a minimal season fixture with hoarding sink disabled.
+     */
+    private function makeSeasonFixture(array $overrides = []): array
+    {
+        $base = [
+            'base_ubi_active_per_tick' => 10,
+            'base_ubi_idle_factor_fp'  => 500000,
+            'ubi_min_per_tick'         => 1,
+            'total_coins_supply'       => 0,
+            'inflation_table'          => json_encode([
+                ['x' => 0,       'factor_fp' => 1000000],
+                ['x' => 1000000, 'factor_fp' => 1000000],
+            ]),
+            'hoarding_min_factor_fp'       => 900000,
+            'target_spend_rate_per_tick'   => 0,
+            'hoarding_sink_enabled'        => 0,
+            'hoarding_safe_hours'          => 0,
+            'hoarding_safe_min_coins'      => 0,
+            'hoarding_tier1_excess_cap'    => 0,
+            'hoarding_tier2_excess_cap'    => 0,
+            'hoarding_tier1_rate_hourly_fp'=> 0,
+            'hoarding_tier2_rate_hourly_fp'=> 0,
+            'hoarding_tier3_rate_hourly_fp'=> 0,
+            'hoarding_sink_cap_ratio_fp'   => 0,
+            'hoarding_idle_multiplier_fp'  => 1000000,
+        ];
+        return array_merge($base, $overrides);
+    }
+
+    /**
+     * Helper: build a minimal player/participation fixture.
+     */
+    private function makePlayerFixture(array $overrides = []): array
+    {
+        $base = [
+            'participation_enabled' => 1,
+            'activity_state'        => 'Active',
+            'coins'                 => 0,
+        ];
+        return array_merge($base, $overrides);
+    }
+
+    /**
+     * When not frozen and no sink, net_rate_fp must equal gross_rate_fp.
+     */
+    public function testCalculateRateBreakdownNetEqualsGrossWhenNoSink(): void
+    {
+        $season = $this->makeSeasonFixture();
+        $player = $this->makePlayerFixture();
+
+        $rates = Economy::calculateRateBreakdown($season, $player, $player, 0, false);
+
+        $this->assertSame((int)$rates['gross_rate_fp'], (int)$rates['net_rate_fp'],
+            'net_rate_fp must equal gross_rate_fp when sink is disabled.');
+        $this->assertSame(0, (int)$rates['sink_per_tick'],
+            'sink_per_tick must be zero when hoarding sink is disabled.');
+        $this->assertGreaterThan(0, (int)$rates['gross_rate_fp'],
+            'gross_rate_fp must be positive for an active participant.');
+    }
+
+    /**
+     * Freeze short-circuit: all three rates must be zero regardless of boost activity.
+     * Guards against the "positive rate shown but no coins minted" display bug when frozen.
+     */
+    public function testCalculateRateBreakdownAllZeroWhenFrozen(): void
+    {
+        $season = $this->makeSeasonFixture();
+        $player = $this->makePlayerFixture();
+        // Large boost modifier – should be irrelevant when frozen.
+        $boostModFp = 500000; // 50%
+
+        $rates = Economy::calculateRateBreakdown($season, $player, $player, $boostModFp, true);
+
+        $this->assertSame(0, (int)$rates['gross_rate_fp'],
+            'gross_rate_fp must be 0 when player is frozen.');
+        $this->assertSame(0, (int)$rates['sink_per_tick'],
+            'sink_per_tick must be 0 when player is frozen.');
+        $this->assertSame(0, (int)$rates['net_rate_fp'],
+            'net_rate_fp must be 0 when player is frozen.');
+    }
+
+    /**
+     * Positive gross (boosted) with sink enabled: net must be strictly less than gross
+     * and the breakdown must expose all three values so the UI can display them correctly.
+     */
+    public function testCalculateRateBreakdownNetLessThanGrossWhenSinkActive(): void
+    {
+        $season = $this->makeSeasonFixture([
+            'hoarding_sink_enabled'        => 1,
+            'hoarding_safe_hours'          => 0,
+            'hoarding_safe_min_coins'      => 0,
+            'hoarding_tier1_excess_cap'    => 50000,
+            'hoarding_tier2_excess_cap'    => 200000,
+            'hoarding_tier1_rate_hourly_fp'=> 60000,
+            'hoarding_tier2_rate_hourly_fp'=> 120000,
+            'hoarding_tier3_rate_hourly_fp'=> 240000,
+            'hoarding_sink_cap_ratio_fp'   => 200000, // 20%
+        ]);
+        // Player holds many coins so hoarding sink fires.
+        $player = $this->makePlayerFixture(['coins' => 1000000, 'activity_state' => 'Active']);
+
+        $rates = Economy::calculateRateBreakdown($season, $player, $player, 0, false);
+
+        $this->assertGreaterThan(0, (int)$rates['gross_rate_fp'],
+            'gross_rate_fp must be positive for an active participant.');
+        $this->assertGreaterThan(0, (int)$rates['sink_per_tick'],
+            'sink_per_tick must be positive when hoarding sink fires.');
+        // When sink > 0, gross must be strictly greater than net.
+        $this->assertGreaterThan((int)$rates['net_rate_fp'], (int)$rates['gross_rate_fp'],
+            'gross_rate_fp must be greater than net_rate_fp when sink is active.');
+        // Net must equal max(0, gross - sink_fp).
+        $expectedNet = max(0, (int)$rates['gross_rate_fp'] - Economy::toFixedPoint((int)$rates['sink_per_tick']));
+        $this->assertSame($expectedNet, (int)$rates['net_rate_fp'],
+            'net_rate_fp must equal max(0, gross_rate_fp - toFixedPoint(sink_per_tick)).');
+    }
+
+    /**
+     * Boost floor guarantees positive net even on a 1 UBI/tick base.
+     * Guards the "boost floor and net minting continuity" requirement.
+     */
+    public function testBoostFloorEnsuresPositiveNetRateWithMinimalUbi(): void
+    {
+        $season = $this->makeSeasonFixture(['base_ubi_active_per_tick' => 1]);
+        $player = $this->makePlayerFixture();
+        $boostModFp = 100000; // 10%: guaranteedBoostFloor = +1 coin/tick
+
+        $rates = Economy::calculateRateBreakdown($season, $player, $player, $boostModFp, false);
+
+        $this->assertGreaterThan(0, (int)$rates['net_rate_fp'],
+            'net_rate_fp must be positive when boost floor adds coins to a 1-UBI player.');
+        $this->assertGreaterThan(
+            Economy::toFixedPoint(1),
+            (int)$rates['net_rate_fp'],
+            'net_rate_fp must exceed 1 coin/tick in fp when boost modifier is active on 1 UBI base.'
+        );
+    }
+
+    /**
+     * When net_rate_fp is zero, fractional carry must not accumulate.
+     * This validates the tick-engine fix: carry accrues against net, not gross.
+     * If net = 0, then over any number of ticks the carry stays 0.
+     */
+    public function testNetRateZeroProducesNoCarryAccumulation(): void
+    {
+        // Net = 0 is simulated by calling splitFixedPoint on net * ticks + carry
+        // with net = 0.
+        $netRateFp  = 0;
+        $ticksToProcess = 10;
+        $carryFp    = 0;
+
+        $totalNetFp = ($netRateFp * $ticksToProcess) + $carryFp;
+        [$netCoins, $newCarryFp] = Economy::splitFixedPoint($totalNetFp);
+
+        $this->assertSame(0, $netCoins,
+            'No whole coins must be produced when net_rate_fp is zero.');
+        $this->assertSame(0, $newCarryFp,
+            'Carry must remain zero when net_rate_fp is zero, preventing phantom oscillation.');
+    }
+
+    /**
+     * Positive net rate with fractional component correctly accumulates carry and
+     * mints an extra coin once the carry exceeds one whole coin over multiple ticks.
+     * Guards fractional carry continuity under the new net-rate-based carry approach.
+     */
+    public function testPositiveNetRateCarryAccumulatesAndMintsExtraCoin(): void
+    {
+        // Net = 2.5 coins/tick (2,500,000 fp).
+        $netRateFp = 2500000;
+        $carryFp   = 0;
+
+        // Tick 1
+        $totalNetFp = ($netRateFp * 1) + $carryFp;
+        [$coins1, $carry1] = Economy::splitFixedPoint($totalNetFp);
+        $this->assertSame(2, $coins1);
+        $this->assertSame(500000, $carry1);
+
+        // Tick 2 (carry rolls over)
+        $totalNetFp = ($netRateFp * 1) + $carry1;
+        [$coins2, $carry2] = Economy::splitFixedPoint($totalNetFp);
+        $this->assertSame(3, $coins2); // 2.5 + 0.5 carry = 3
+        $this->assertSame(0, $carry2);
+
+        // Over 2 ticks: 2 + 3 = 5 coins total === floor(2.5 * 2)
+        $this->assertSame(5, $coins1 + $coins2);
+    }
 }

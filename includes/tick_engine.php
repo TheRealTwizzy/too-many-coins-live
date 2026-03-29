@@ -138,23 +138,37 @@ class TickEngine {
                     self::processSigilDrops($season, $p, $seasonId, $gameTime, $currentSeasonTick, $ticksToProcess, $startTime, $lastSeasonTick, $boostModFp);
                 }
                 
-                // Phase 5: UBI accrual (gross) + explicit hoarding sink (burn).
+                // Phase 5: UBI accrual (net) + explicit hoarding sink accounting.
+                //
+                // Bug fix: the old code accumulated fractional carry from the GROSS rate, then
+                // subtracted whole-coin sink per tick.  When gross rate has a fractional part and
+                // the sink fires every tick in a batch, the player could lose coins even when
+                // calculateRateBreakdown reports net_rate_fp = 0 — because carry only ticks over
+                // to a whole coin every N ticks but the sink deducts each tick unconditionally.
+                // Correct semantics: accumulate carry against the NET rate (max(0, gross - sink_fp))
+                // so that fractional precision is preserved at the effective rate and no phantom
+                // drain occurs when net is zero.  The sink amount is still tracked separately for
+                // hoarding_sink_total and season-supply accounting.
                 $rates = Economy::calculateRateBreakdown($season, $p, $p, $boostModFp, $isFrozen);
-                $ratePerTickFp = (int)$rates['gross_rate_fp'];
+                $netRateFp   = (int)$rates['net_rate_fp'];
                 $sinkPerTick = (int)$rates['sink_per_tick'];
 
+                // Carry accumulates against effective net rate; when net is 0, carry does not increase (existing fractional carry, if any, is preserved).
                 $carryFp = max(0, (int)($p['coins_fractional_fp'] ?? 0));
-                $totalUbiFp = ($ratePerTickFp * $ticksToProcess) + $carryFp;
-                [$totalUbi, $newCarryFp] = Economy::splitFixedPoint($totalUbiFp);
+                $totalNetFp = ($netRateFp * $ticksToProcess) + $carryFp;
+                [$netCoins, $newCarryFp] = Economy::splitFixedPoint($totalNetFp);
 
+                // Sink here is an accounting-only metric for supply/hoarding reporting; it is not
+                // directly debited from the player's balance in this block. Cap it to the amount
+                // the player could have actually lost this tick so reported sink never exceeds
+                // the maximum burnable balance.
                 $totalSink = max(0, $sinkPerTick * $ticksToProcess);
-                $maxBurnable = max(0, ((int)($p['coins'] ?? 0)) + $totalUbi);
+                $maxBurnable = max(0, ((int)($p['coins'] ?? 0)) + $netCoins);
                 $totalSink = min($totalSink, $maxBurnable);
-                $netCoins = max(0, $totalUbi - $totalSink);
 
                 $db->query(
-                    "UPDATE season_participation SET coins = GREATEST(0, coins + ? - ?), coins_fractional_fp = ?, hoarding_sink_total = hoarding_sink_total + ? WHERE player_id = ? AND season_id = ?",
-                    [$totalUbi, $totalSink, $newCarryFp, $totalSink, $playerId, $seasonId]
+                    "UPDATE season_participation SET coins = GREATEST(0, coins + ?), coins_fractional_fp = ?, hoarding_sink_total = hoarding_sink_total + ? WHERE player_id = ? AND season_id = ?",
+                    [$netCoins, $newCarryFp, $totalSink, $playerId, $seasonId]
                 );
                 $totalNewCoins += $netCoins;
                 $totalBurnedCoins += $totalSink;

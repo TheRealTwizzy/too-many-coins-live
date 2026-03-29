@@ -151,8 +151,8 @@ define('SIGIL_TIER_ODDS_MAX_POWER', [
 ]);
 
 // Freeze mechanics (Tier 6 sigil action)
-define('FREEZE_BASE_DURATION_TICKS', ticks_from_real_seconds(1200)); // 20 minutes
-define('FREEZE_STACK_MULTIPLIER_FP', 1250000); // 1.25x
+define('FREEZE_BASE_DURATION_TICKS', ticks_from_real_seconds(1800)); // 30 minutes
+define('FREEZE_STACK_EXTENSION_TICKS', ticks_from_real_seconds(900)); // +15 minutes per additional freeze
 
 // Guaranteed boost floor: +1 whole coin per tick for each 10% effective boost.
 // Set cap to 0 for no cap.

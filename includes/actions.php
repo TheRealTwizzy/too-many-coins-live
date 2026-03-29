@@ -1082,12 +1082,15 @@ class Actions {
 
         $newRemaining = (int)FREEZE_BASE_DURATION_TICKS;
         if ($existing) {
-            $existingRemaining = max(0, (int)$existing['expires_tick'] - $nowTick);
-            if ($existingRemaining > 0) {
-                $newRemaining = max(1, intdiv($existingRemaining * (int)FREEZE_STACK_MULTIPLIER_FP, FP_SCALE));
-            }
+            // Flat +15-minute extension: add FREEZE_STACK_EXTENSION_TICKS to the
+            // current expiry tick (preserving any remaining duration rather than
+            // resetting it) so each additional freeze predictably extends the timer.
+            $existingExpires = (int)$existing['expires_tick'];
+            $newExpires = max($existingExpires, $nowTick) + (int)FREEZE_STACK_EXTENSION_TICKS;
+            $newRemaining = $newExpires - $nowTick;
+        } else {
+            $newExpires = $nowTick + $newRemaining;
         }
-        $newExpires = $nowTick + $newRemaining;
 
         $db->beginTransaction();
         try {

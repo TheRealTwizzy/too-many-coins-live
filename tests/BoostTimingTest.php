@@ -318,6 +318,56 @@ class FreezeAccrualLogic
     }
 }
 
+/**
+ * Simulates the freeze-purchase timing logic (T6 sigil action).
+ *
+ * Freeze rules (as of the 30-min / +15-min requirement):
+ *  - Initial freeze: 30 minutes = 30 ticks at 1 tick/minute.
+ *  - Additional freeze on same target while already frozen: adds 15 minutes
+ *    (15 ticks) to the CURRENT expiry tick rather than resetting from now.
+ *    This preserves existing duration and extends predictably.
+ *
+ * Mirrors: actions.php freezePlayerUbi() stacking block.
+ */
+class FreezePurchaseLogic
+{
+    /**
+     * Ticks for the initial 30-minute base freeze.
+     * Mirrors FREEZE_BASE_DURATION_TICKS = ticks_from_real_seconds(1800).
+     * ticks_from_real_seconds uses TICK_REAL_SECONDS (default 60): ceil(1800/60) = 30.
+     */
+    public const BASE_DURATION_TICKS = 30;
+
+    /**
+     * Ticks added per additional freeze on the same target (+15 minutes flat).
+     * Mirrors FREEZE_STACK_EXTENSION_TICKS = ticks_from_real_seconds(900).
+     * ticks_from_real_seconds uses TICK_REAL_SECONDS (default 60): ceil(900/60) = 15.
+     */
+    public const STACK_EXTENSION_TICKS = 15;
+
+    /**
+     * Compute expires_tick for a fresh (first) freeze at gameTime.
+     */
+    public static function computeInitialExpiresTick(int $gameTime): int
+    {
+        return $gameTime + self::BASE_DURATION_TICKS;
+    }
+
+    /**
+     * Compute expires_tick when stacking a freeze on a target already frozen.
+     * Adds STACK_EXTENSION_TICKS to the existing expiry, preserving duration.
+     *
+     * @param int $existingExpiresTick  Current expires_tick of the active freeze.
+     * @param int $gameTime             Current game tick at purchase time.
+     * @return int New expires_tick.
+     */
+    public static function computeStackedExpiresTick(int $existingExpiresTick, int $gameTime): int
+    {
+        // max() guard: if the recorded expiry is somehow behind now, extend from now.
+        return max($existingExpiresTick, $gameTime) + self::STACK_EXTENSION_TICKS;
+    }
+}
+
 class BoostTimingTest extends TestCase
 {
     // -----------------------------------------------------------------------
@@ -1173,5 +1223,112 @@ class BoostTimingTest extends TestCase
         $newExpires = BoostTimePurchaseLogic::computeNewExpiresTick(400, $gameTime, $extendTicks);
         $this->assertSame($gameTime + $extendTicks, $newExpires,
             'New expires_tick must use gameTime as floor when stored expires_tick has already passed.');
+    }
+
+    // -----------------------------------------------------------------------
+    // Freeze purchase timing tests (T6 sigil action)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Initial freeze duration must be exactly 30 minutes (30 ticks at 1 tick/min).
+     */
+    public function testFreezeInitialDurationIs30Minutes(): void
+    {
+        $gameTime = 1000;
+        $expires  = FreezePurchaseLogic::computeInitialExpiresTick($gameTime);
+
+        $this->assertSame(
+            $gameTime + FreezePurchaseLogic::BASE_DURATION_TICKS,
+            $expires,
+            'Initial freeze must expire exactly 30 ticks (30 minutes) after purchase.'
+        );
+        $this->assertSame(
+            30,
+            FreezePurchaseLogic::BASE_DURATION_TICKS,
+            'BASE_DURATION_TICKS must be 30 (30 minutes at 1 tick/minute).'
+        );
+    }
+
+    /**
+     * Stacking a freeze on an already-frozen target adds exactly +15 minutes
+     * (15 ticks) to the existing expiry, not to the current tick.
+     * This preserves the full remaining duration and extends beyond it.
+     */
+    public function testFreezeStackAddsFlatFifteenMinuteExtension(): void
+    {
+        $gameTime       = 1000;
+        $existingExpiry = 1020; // 20 ticks remaining
+
+        $newExpiry = FreezePurchaseLogic::computeStackedExpiresTick($existingExpiry, $gameTime);
+
+        $this->assertSame(
+            $existingExpiry + FreezePurchaseLogic::STACK_EXTENSION_TICKS,
+            $newExpiry,
+            'Stacking must add STACK_EXTENSION_TICKS to the existing expiry tick.'
+        );
+        $this->assertSame(
+            15,
+            FreezePurchaseLogic::STACK_EXTENSION_TICKS,
+            'STACK_EXTENSION_TICKS must be 15 (15 minutes at 1 tick/minute).'
+        );
+        // Player sees: was 20 ticks remaining, now 35 ticks remaining.
+        $this->assertSame(35, $newExpiry - $gameTime,
+            'Remaining ticks after stack must equal prior remaining (20) + extension (15) = 35.');
+    }
+
+    /**
+     * Stacking preserves the existing duration entirely; remaining time
+     * is old-remaining + extension rather than a reset from now.
+     */
+    public function testFreezeStackPreservesExistingRemainingDuration(): void
+    {
+        $gameTime       = 500;
+        $existingExpiry = 528; // 28 ticks remaining (almost a full base freeze)
+
+        $newExpiry    = FreezePurchaseLogic::computeStackedExpiresTick($existingExpiry, $gameTime);
+        $newRemaining = $newExpiry - $gameTime;
+
+        $this->assertSame(43, $newRemaining,
+            'Remaining must be 28 (existing) + 15 (extension) = 43 ticks, not reset to base 30.');
+    }
+
+    /**
+     * Two additional freezes on the same target accumulate +15 min each time.
+     */
+    public function testFreezeDoubleStackAddsTwiceFifteenMinutes(): void
+    {
+        $gameTime = 200;
+        // Start: initial freeze
+        $expires1 = FreezePurchaseLogic::computeInitialExpiresTick($gameTime); // 230
+
+        // First stack (gameTime still 200, imagine it's the same tick)
+        $expires2 = FreezePurchaseLogic::computeStackedExpiresTick($expires1, $gameTime); // 245
+
+        // Second stack
+        $expires3 = FreezePurchaseLogic::computeStackedExpiresTick($expires2, $gameTime); // 260
+
+        $this->assertSame($gameTime + 30, $expires1, 'Initial: 30 ticks.');
+        $this->assertSame($gameTime + 45, $expires2, 'After 1 stack: 30 + 15 = 45 ticks.');
+        $this->assertSame($gameTime + 60, $expires3, 'After 2 stacks: 30 + 15 + 15 = 60 ticks.');
+    }
+
+    /**
+     * If the existing freeze has already expired (expires_tick < gameTime),
+     * the stack extension is applied from now (max guard), not a negative offset.
+     * In practice the DB query only returns active freezes (expires_tick >= gameTime),
+     * so this is a defensive test.
+     */
+    public function testFreezeStackOnExpiredFreezeUsesNowAsFloor(): void
+    {
+        $gameTime       = 1000;
+        $existingExpiry = 990; // already expired
+
+        $newExpiry = FreezePurchaseLogic::computeStackedExpiresTick($existingExpiry, $gameTime);
+
+        $this->assertSame(
+            $gameTime + FreezePurchaseLogic::STACK_EXTENSION_TICKS,
+            $newExpiry,
+            'When existing expiry is in the past, extension must be applied from gameTime (max guard).'
+        );
     }
 }

@@ -447,7 +447,11 @@ const TMC = {
         document.getElementById('hud-sigils').textContent = totalSigils;
         const ratePerTick = Number(p.participation.rate_per_tick || 0);
         const sinkPerTick = Number(p.participation.hoarding_sink_per_tick || 0);
-        const netRatePerTick = Number(p.participation.net_rate_per_tick || ratePerTick);
+        // Bug fix: do NOT use `|| ratePerTick` here – when net_rate_per_tick is exactly 0
+        // (sink fully absorbs gross), the falsy fallback would display the gross rate as the
+        // net rate, misleading users into thinking they are earning coins when they are not.
+        const rawNet = p.participation.net_rate_per_tick;
+        const netRatePerTick = (rawNet !== undefined && rawNet !== null) ? Number(rawNet) : ratePerTick;
         const rateEl = document.getElementById('hud-rate');
         const rateLabelEl = document.querySelector('.hud-rate .hud-label');
         const freeze = p.participation.freeze || { is_frozen: false };
