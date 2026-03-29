@@ -19,6 +19,7 @@ const TMC = {
         cosmetics: [],
         myCosmetics: [],
         boostCountdowns: {},
+        freezeCountdown: null,
         leaderboardTab: 'global',
         pendingTradeTargetId: null,
         notifications: [],
@@ -97,6 +98,7 @@ const TMC = {
         this.state.player = gs.player || null;
         this.syncNotificationsFromPlayer(this.state.player);
         this.syncBoostCountdowns();
+        this.syncFreezeCountdown();
         this.renderUserArea();
 
         if (this.state.currentScreen === 'auth' && this.state.player) {
@@ -314,6 +316,32 @@ const TMC = {
         });
     },
 
+    syncFreezeCountdown() {
+        const p = this.state.player;
+        const freeze = p && p.participation ? p.participation.freeze : null;
+        if (!freeze || !freeze.is_frozen) {
+            this.state.freezeCountdown = null;
+            return;
+        }
+
+        const remainingSeconds = Math.max(0, parseInt(freeze.remaining_real_seconds, 10) || 0);
+        this.state.freezeCountdown = {
+            remainingSeconds,
+            syncedAtMs: Date.now()
+        };
+    },
+
+    getLiveFreezeRemainingSeconds() {
+        const freeze = this.state.freezeCountdown;
+        if (!freeze) return 0;
+        const elapsedSeconds = Math.floor((Date.now() - freeze.syncedAtMs) / 1000);
+        return Math.max(0, freeze.remainingSeconds - elapsedSeconds);
+    },
+
+    _formatFreezeTimeLeft(remainingSeconds) {
+        return remainingSeconds > 0 ? this.formatSecondsRemaining(remainingSeconds) : 'Expiring\u2026';
+    },
+
     // Compute live remaining seconds for a boost using the authoritative
     // wall-clock expiry timestamp.  Returns 0 (never negative) once expired.
     getLiveBoostRemainingSeconds(boost) {
@@ -340,6 +368,23 @@ const TMC = {
             const el = document.querySelector(`.active-boost-item[data-boost-id="${key}"] .ab-time`);
             if (!el) return;
             el.textContent = this._formatBoostTimeLeft(this.getLiveBoostRemainingSeconds(b));
+        });
+    },
+
+    _tickFreezeCountdowns() {
+        const p = this.state.player;
+        const freeze = p && p.participation ? p.participation.freeze : null;
+        if (!freeze || !freeze.is_frozen) return;
+
+        const freezeTimeText = this._formatFreezeTimeLeft(this.getLiveFreezeRemainingSeconds());
+        const hudRateLabel = document.querySelector('.hud-rate .hud-label');
+        if (hudRateLabel) {
+            hudRateLabel.textContent = `Rate Frozen (${freezeTimeText})`;
+        }
+
+        const freezeTimeEls = document.querySelectorAll('.freeze-time');
+        freezeTimeEls.forEach((el) => {
+            el.textContent = freezeTimeText;
         });
     },
 
@@ -402,7 +447,25 @@ const TMC = {
         document.getElementById('hud-sigils').textContent = totalSigils;
         const ratePerTick = Number(p.participation.rate_per_tick || 0);
         const rateEl = document.getElementById('hud-rate');
-        if (rateEl) rateEl.textContent = this.formatNumber(ratePerTick);
+        const rateLabelEl = document.querySelector('.hud-rate .hud-label');
+        const freeze = p.participation.freeze || { is_frozen: false };
+        if (rateEl) {
+            if (freeze.is_frozen) {
+                rateEl.textContent = '0';
+                rateEl.classList.add('rate-frozen-active');
+            } else {
+                rateEl.textContent = this.formatNumber(ratePerTick);
+                rateEl.classList.remove('rate-frozen-active');
+            }
+        }
+        if (rateLabelEl) {
+            if (freeze.is_frozen) {
+                const freezeTime = this._formatFreezeTimeLeft(this.getLiveFreezeRemainingSeconds());
+                rateLabelEl.textContent = `Rate Frozen (${freezeTime})`;
+            } else {
+                rateLabelEl.textContent = 'Rate';
+            }
+        }
 
         // Boost total modifier only
         const boosts = p.active_boosts || { self: [], global: [], total_modifier_percent: 0 };
@@ -439,6 +502,8 @@ const TMC = {
             }
             this._tickBoostCountdowns();
         }
+
+        this._tickFreezeCountdowns();
     },
 
     syncSeasonCountdowns(seasons) {
@@ -1311,7 +1376,9 @@ const TMC = {
 
         const p = this.state.player;
         const boosts = p ? p.active_boosts : null;
-        if (!boosts || ((boosts.self || []).length === 0 && (boosts.global || []).length === 0)) {
+        const freeze = p && p.participation ? p.participation.freeze : null;
+        const isFrozen = !!(freeze && freeze.is_frozen);
+        if (!boosts || (((boosts.self || []).length === 0 && (boosts.global || []).length === 0) && !isFrozen)) {
             container.innerHTML = '<p class="empty-text">No active boosts.</p>';
             return;
         }
@@ -1339,6 +1406,16 @@ const TMC = {
         }
         if (boosts.global.length > 0) {
             html += '<div class="ab-section"><h4>Season-Wide Boosts</h4>' + boosts.global.map(b => renderBoost(b, 'global')).join('') + '</div>';
+        }
+        if (isFrozen) {
+            const freezeTime = this._formatFreezeTimeLeft(this.getLiveFreezeRemainingSeconds());
+            html += `<div class="ab-section"><h4>Freeze Effects</h4>
+                <div class="active-boost-item freeze" data-freeze-active="1">
+                    <span class="ab-name">Tier 6 Freeze</span>
+                    <span class="ab-mod ab-mod-freeze">Rate Frozen</span>
+                    <span class="ab-time freeze-time">${freezeTime}</span>
+                </div>
+            </div>`;
         }
 
         container.innerHTML = html;
@@ -1476,6 +1553,9 @@ const TMC = {
         const status = this.getPlayerStatus(entry);
         const key = status.toLowerCase().replace(/[^a-z]+/g, '-');
         let badge = `<span class="status-dot status-dot-${key}" title="${status}"></span>`;
+        if (Number(entry.is_frozen || 0) > 0) {
+            badge += ` <span class="status-dot status-dot-frozen" title="Frozen"></span>`;
+        }
         if (entry.lock_in_effect_tick != null) {
             badge += ` <span class="status-dot status-dot-locked-in" title="Locked-In"></span>`;
         }

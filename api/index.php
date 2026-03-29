@@ -506,7 +506,7 @@ function getSigilDropRateMetadataFromConfig(array $dropConfig) {
 function calculatePlayerRatePerTick($season, $player, $participation, $activeBoosts) {
     if (!$season || !$participation) return 0;
     if (isPlayerFrozen((int)$player['player_id'], (int)$season['season_id'])) {
-        return max(0, round((float)Economy::calculateUBI($season, $player, $participation), 2));
+        return 0;
     }
 
     $baseUbi = Economy::calculateUBI($season, $player, $participation);
@@ -766,6 +766,7 @@ function getLeaderboard($seasonId) {
                     COALESCE(sp.participation_bonus, 0) AS participation_bonus,
                     COALESCE(sp.placement_bonus, 0) AS placement_bonus,
                     p.activity_state, p.online_current,
+                    COALESCE(frz.is_frozen, 0) AS is_frozen,
                     ROUND(
                         LEAST(
                             COALESCE(self_b.self_fp, 0) + glob_b.global_fp,
@@ -780,6 +781,12 @@ function getLeaderboard($seasonId) {
                  WHERE season_id = ? AND is_active = 1 AND scope = 'SELF' AND expires_tick >= ?
                  GROUP BY player_id
              ) self_b ON self_b.player_id = p.player_id
+             LEFT JOIN (
+                 SELECT target_player_id AS player_id, 1 AS is_frozen
+                 FROM active_freezes
+                 WHERE season_id = ? AND is_active = 1 AND expires_tick >= ?
+                 GROUP BY target_player_id
+             ) frz ON frz.player_id = p.player_id
              CROSS JOIN (
                  SELECT COALESCE(SUM(modifier_fp), 0) AS global_fp
                  FROM active_boosts
@@ -787,7 +794,7 @@ function getLeaderboard($seasonId) {
              ) glob_b
              WHERE p.joined_season_id = ? AND p.participation_enabled = 1
              ORDER BY COALESCE(sp.seasonal_stars, 0) DESC, p.player_id ASC",
-            [$seasonId, $seasonId, $gameTime, $seasonId, $gameTime, $seasonId]
+            [$seasonId, $seasonId, $gameTime, $seasonId, $gameTime, $seasonId, $gameTime, $seasonId]
         );
     }
 
@@ -796,6 +803,7 @@ function getLeaderboard($seasonId) {
                 sp.lock_in_effect_tick, sp.end_membership, sp.badge_awarded,
                 sp.global_stars_earned, sp.participation_bonus, sp.placement_bonus,
                 p.activity_state, p.online_current,
+                0 AS is_frozen,
                 0.0 AS boost_pct
          FROM season_participation sp
          JOIN players p ON p.player_id = sp.player_id
@@ -1153,20 +1161,40 @@ function isPlayerFrozen($playerId, $seasonId) {
 }
 
 function getFreezeStatusForPlayer($playerId, $seasonId) {
-    if (!$seasonId) return ['is_frozen' => false, 'remaining_ticks' => 0, 'expires_tick' => null];
+    if (!$seasonId) {
+        return [
+            'is_frozen' => false,
+            'remaining_ticks' => 0,
+            'expires_tick' => null,
+            'expires_at_real' => null,
+            'remaining_real_seconds' => 0,
+        ];
+    }
     $db = Database::getInstance();
     $gameTime = GameTime::now();
+    $serverNowUnix = time();
     $row = $db->fetch(
         "SELECT expires_tick FROM active_freezes
          WHERE target_player_id = ? AND season_id = ? AND is_active = 1 AND expires_tick >= ?
          ORDER BY expires_tick DESC LIMIT 1",
         [(int)$playerId, (int)$seasonId, (int)$gameTime]
     );
-    if (!$row) return ['is_frozen' => false, 'remaining_ticks' => 0, 'expires_tick' => null];
+    if (!$row) {
+        return [
+            'is_frozen' => false,
+            'remaining_ticks' => 0,
+            'expires_tick' => null,
+            'expires_at_real' => null,
+            'remaining_real_seconds' => 0,
+        ];
+    }
     $expiresTick = (int)$row['expires_tick'];
+    $expiresAtReal = GameTime::tickStartRealUnix($expiresTick + 1);
     return [
         'is_frozen' => true,
         'remaining_ticks' => max(0, $expiresTick - (int)$gameTime),
         'expires_tick' => $expiresTick,
+        'expires_at_real' => $expiresAtReal,
+        'remaining_real_seconds' => max(0, $expiresAtReal - $serverNowUnix),
     ];
 }

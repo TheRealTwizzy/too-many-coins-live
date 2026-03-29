@@ -1023,7 +1023,7 @@ class Actions {
     }
 
     /**
-     * Consume a Tier 6 sigil to freeze another player's UBI generation.
+     * Consume a Tier 6 sigil to freeze another player's UBI accrual to 0/tick.
      */
     public static function freezePlayerUbi($playerId, $targetPlayerId = null, $targetHandle = null) {
         $db = Database::getInstance();

@@ -296,6 +296,28 @@ class BoostTimePurchaseLogic
     }
 }
 
+/**
+ * Simulates server-side effective UBI rate behavior when freeze is active.
+ */
+class FreezeAccrualLogic
+{
+    private const FP_SCALE = 1000000;
+    private const FLOOR_STEP_FP = 100000; // 10%
+
+    public static function effectiveRatePerTickFp(int $baseUbiCoins, int $boostModFp, bool $isFrozen): int
+    {
+        if ($isFrozen) {
+            return 0;
+        }
+
+        $baseFp = max(0, $baseUbiCoins) * self::FP_SCALE;
+        $boostedFp = intdiv($baseFp * (self::FP_SCALE + max(0, $boostModFp)), self::FP_SCALE);
+        $floorCoins = intdiv(max(0, $boostModFp), self::FLOOR_STEP_FP);
+
+        return $boostedFp + ($floorCoins * self::FP_SCALE);
+    }
+}
+
 class BoostTimingTest extends TestCase
 {
     // -----------------------------------------------------------------------
@@ -897,6 +919,33 @@ class BoostTimingTest extends TestCase
             'Tier 5 boost must NOT apply at T+1441 (tick 2441).');
         $this->assertFalse($result['isActiveAfter'],
             'Tier 5 boost must be expired at T+1441.');
+    }
+
+    public function testFreezeForcesEffectiveRateToZeroEvenWithBoosts(): void
+    {
+        $rateFp = FreezeAccrualLogic::effectiveRatePerTickFp(7, 200000, true);
+        $this->assertSame(0, $rateFp,
+            'Freeze must force effective UBI accrual to 0 per tick even when boosts are active.');
+    }
+
+    public function testNonFrozenRateStillUsesBoostAndFloor(): void
+    {
+        $rateFp = FreezeAccrualLogic::effectiveRatePerTickFp(7, 200000, false);
+        $this->assertSame(10400000, $rateFp,
+            'Non-frozen rate must include both boost multiplier and guaranteed floor.');
+    }
+
+    public function testFreezeDoesNotPauseBoostExpiryTimeline(): void
+    {
+        $expiresTick = BoostTimingLogic::computeExpiresTick(100, 3); // 103
+
+        $atExpiry = BoostTimingLogic::processTick($expiresTick, true, 103);
+        $afterExpiry = BoostTimingLogic::processTick($expiresTick, true, 104);
+
+        $this->assertTrue($atExpiry['applied'],
+            'Boost must still apply at expires_tick while frozen state is unrelated to expiry timeline.');
+        $this->assertFalse($afterExpiry['applied'],
+            'Boost must expire on schedule even if the target is frozen.');
     }
 
     /**

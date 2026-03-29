@@ -302,6 +302,7 @@ a:hover { text-decoration: underline; }
 .hud-stars .hud-value { color: var(--accent-blue-light); }
 .hud-sigils .hud-value { color: var(--accent-purple); }
 .hud-rate .hud-value { color: var(--accent-cyan); }
+.hud-rate .hud-value.rate-frozen-active { color: #ef4444; }
 .hud-global .hud-value { color: var(--accent-gold-light); }
 .activity-active { color: var(--accent-green) !important; }
 .activity-idle { color: var(--accent-orange) !important; }
@@ -637,6 +638,7 @@ a:hover { text-decoration: underline; }
     flex-shrink: 0;
 }
 .status-dot-active    { background: var(--accent-green); }
+.status-dot-frozen    { background: var(--accent-blue); }
 .status-dot-locked-in { background: var(--accent-purple); }
 .status-dot-idle      { background: var(--accent-orange); }
 .status-dot-offline   { background: var(--text-muted); }
@@ -1954,6 +1956,11 @@ a:hover { text-decoration: underline; }
     border-left: 3px solid #f59e0b;
 }
 
+.active-boost-item.freeze {
+    background: rgba(239, 68, 68, 0.1);
+    border-left: 3px solid #ef4444;
+}
+
 .ab-name {
     font-weight: 600;
     color: var(--text-primary);
@@ -1972,6 +1979,13 @@ a:hover { text-decoration: underline; }
     color: var(--accent-blue-light);
     font-size: 0.75rem;
     font-family: var(--font-mono);
+}
+
+.ab-mod-freeze {
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.16);
+    padding: 0.1rem 0.45rem;
+    border-radius: 4px;
 }
 
 .ab-by {

@@ -144,8 +144,8 @@ class TickEngine {
                 $ratePerTickFp = Economy::applyBoostModifierFp($ratePerTickFp, $boostModFp);
                 $ratePerTickFp += Economy::guaranteedBoostFloorFp($boostModFp);
                 if ($isFrozen) {
-                    // Freeze suppresses boost effect only; base UBI still accrues.
-                    $ratePerTickFp = Economy::toFixedPoint($baseUbi);
+                    // Freeze forces effective UBI accrual to zero while timers continue.
+                    $ratePerTickFp = 0;
                 }
 
                 $carryFp = max(0, (int)($p['coins_fractional_fp'] ?? 0));
