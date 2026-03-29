@@ -897,6 +897,8 @@ class Actions {
                     $newModifier = $baseModifierFp;
                 }
             } else {
+                // Grant exactly the catalog-listed extension. Do NOT multiply by power stack —
+                // the player is purchasing the flat amount shown on the purchase button.
                 $extendTicks = max(1, $timeExtensionTicks);
                 $expiresTick = max((int)$active['expires_tick'], $gameTime) + $extendTicks;
                 $newModifier = (int)$active['modifier_fp'];
@@ -938,7 +940,7 @@ class Actions {
                 'tier_consumed' => $tierRequired,
                 'message' => ($purchaseKind === 'power')
                     ? "{$boost['name']} power purchased. Total UBI +" . round($newModifier / 10000, 1) . "% for {$scopeLabel}."
-                    : "{$boost['name']} timer extended by {$timeExtensionTicks} ticks."
+                    : "{$boost['name']} timer extended by {$extendTicks} ticks."
             ];
         } catch (Exception $e) {
             $db->rollback();

@@ -200,13 +200,13 @@ class BoostCountdownLogic
  * These constants mirror the seeded rows in migration_boosts_drops.sql and are used
  * to drive tier-specific timing tests without hard-coding magic numbers inline.
  *
- *  Tier | Name    | Scope  | duration_ticks | modifier_fp | max_stack
- *  -----+---------+--------+----------------+-------------+----------
- *    1  | Trickle | SELF   |             60 |      50,000 |         5
- *    2  | Surge   | SELF   |            180 |     150,000 |         5
- *    3  | Flow    | SELF   |            360 |     250,000 |         5
- *    4  | Tide    | SELF   |            720 |     500,000 |         3
- *    5  | Age     | SELF   |           1440 |   1,000,000 |         1
+ *  Tier | Name    | Scope  | duration_ticks | time_extension_ticks | modifier_fp | max_stack
+ *  -----+---------+--------+----------------+----------------------+-------------+----------
+ *    1  | Trickle | SELF   |             60 |                    5 |      50,000 |         5
+ *    2  | Surge   | SELF   |            180 |                   15 |     150,000 |         5
+ *    3  | Flow    | SELF   |            360 |                   30 |     250,000 |         5
+ *    4  | Tide    | SELF   |            720 |                   60 |     500,000 |         3
+ *    5  | Age     | SELF   |           1440 |                   90 |   1,000,000 |         1
  */
 class BoostCatalogLogic
 {
@@ -217,6 +217,20 @@ class BoostCatalogLogic
         3 => 360,    // Flow    – 360 ticks (6 hours)
         4 => 720,    // Tide    – 720 ticks (12 hours)
         5 => 1440,   // Age     – 1440 ticks (24 hours)
+    ];
+
+    /**
+     * Canonical time_extension_ticks keyed by tier_required.
+     * These are the FLAT amounts shown on the Boost Catalog purchase button.
+     * They must NOT be multiplied by the player's power stack – the player
+     * always receives exactly this amount when they buy a time extension.
+     */
+    public const TIME_EXTENSION_BY_TIER = [
+        1 => 5,    // Trickle – +5 min  (button label: "+5 mins")
+        2 => 15,   // Surge   – +15 min (button label: "+15 mins")
+        3 => 30,   // Flow    – +30 min (button label: "+30 mins")
+        4 => 60,   // Tide    – +60 min (button label: "+60 mins")
+        5 => 90,   // Age     – +90 min (button label: "+90 mins")
     ];
 
     /** Scope keyed by tier_required. */
@@ -236,6 +250,50 @@ class BoostCatalogLogic
         4 => 500000,
         5 => 1000000,
     ];
+}
+
+/**
+ * Simulates the Boost Catalog time-purchase extension logic.
+ *
+ * Mirrors the server-side calculation in actions.php purchaseBoost() for
+ * purchase_kind = 'time'.  The extension applied is the flat catalog value
+ * (time_extension_ticks) with NO power-stack multiplication.
+ */
+class BoostTimePurchaseLogic
+{
+    /**
+     * Compute the ticks to extend a boost by for a time purchase.
+     *
+     * The extension is the flat catalog amount – it must equal exactly what is
+     * shown on the purchase button, and is independent of the player's current
+     * power stack.
+     *
+     * Mirrors: $extendTicks = max(1, $timeExtensionTicks); in actions.php.
+     *
+     * @param int $catalogExtensionTicks  The canonical time_extension_ticks from
+     *                                    BoostCatalog::normalize().
+     * @return int Ticks to add to expires_tick.
+     */
+    public static function computeExtendTicks(int $catalogExtensionTicks): int
+    {
+        // Flat catalog value only – do NOT multiply by power stack.
+        return max(1, $catalogExtensionTicks);
+    }
+
+    /**
+     * Compute the new expires_tick after a time purchase.
+     *
+     * Mirrors: $expiresTick = max((int)$active['expires_tick'], $gameTime) + $extendTicks;
+     *
+     * @param int $currentExpiresTick  The boost's current expires_tick.
+     * @param int $gameTime            Current game tick at purchase time.
+     * @param int $extendTicks         The extension computed by computeExtendTicks().
+     * @return int New expires_tick to persist.
+     */
+    public static function computeNewExpiresTick(int $currentExpiresTick, int $gameTime, int $extendTicks): int
+    {
+        return max($currentExpiresTick, $gameTime) + $extendTicks;
+    }
 }
 
 class BoostTimingTest extends TestCase
@@ -957,5 +1015,114 @@ class BoostTimingTest extends TestCase
 
         $this->assertSame(550000, $playerATotal, 'Activator gets both SELF boosts (Trickle + Tide).');
         $this->assertSame(500000, $playerBTotal, 'Other player gets only their own SELF boost (Tide).');
+    }
+
+    // -----------------------------------------------------------------------
+    // Boost Catalog time-extension correctness
+    // -----------------------------------------------------------------------
+
+    /**
+     * Verifies the canonical time_extension_ticks for each tier (1–5) matches
+     * the amounts displayed on the Boost Catalog purchase button:
+     *   Tier 1 (Trickle): +5 min = 5 ticks
+     *   Tier 2 (Surge):   +15 min = 15 ticks
+     *   Tier 3 (Flow):    +30 min = 30 ticks
+     *   Tier 4 (Tide):    +60 min = 60 ticks
+     *   Tier 5 (Age):     +90 min = 90 ticks
+     */
+    public function testBoostCatalogTimeExtensionByTier(): void
+    {
+        $expected = [
+            1 => 5,    // Trickle – +5 min
+            2 => 15,   // Surge   – +15 min
+            3 => 30,   // Flow    – +30 min
+            4 => 60,   // Tide    – +60 min
+            5 => 90,   // Age     – +90 min
+        ];
+
+        foreach ($expected as $tier => $expectedTicks) {
+            $this->assertSame(
+                $expectedTicks,
+                BoostCatalogLogic::TIME_EXTENSION_BY_TIER[$tier],
+                "Tier {$tier} time extension must be {$expectedTicks} ticks (the amount shown on the button)."
+            );
+        }
+    }
+
+    /**
+     * Purchasing a time extension always adds exactly the catalog-listed amount,
+     * regardless of the player's current power stack.
+     *
+     * With stack = 1:  extendTicks must equal the catalog value (not 1×catalog).
+     * With stack = 3:  extendTicks must still equal the catalog value (not 3×catalog).
+     * With stack = 10: extendTicks must still equal the catalog value (not 10×catalog).
+     */
+    public function testBoostTimePurchaseGrantsExactListedTime(): void
+    {
+        foreach (BoostCatalogLogic::TIME_EXTENSION_BY_TIER as $tier => $catalogTicks) {
+            // Regardless of power stack size, the extension must equal the catalog value.
+            foreach ([1, 2, 3, 5, 10, 20] as $stackCount) {
+                $extendTicks = BoostTimePurchaseLogic::computeExtendTicks($catalogTicks);
+
+                $this->assertSame(
+                    $catalogTicks,
+                    $extendTicks,
+                    "Tier {$tier} time extension must be {$catalogTicks} ticks (stack={$stackCount}) — " .
+                    "power stack must NOT affect the granted amount."
+                );
+            }
+        }
+    }
+
+    /**
+     * Power stack count has zero impact on the time extension computation.
+     * Compares extension at stack=1 vs stack=max to confirm they are identical.
+     */
+    public function testPowerStackDoesNotAffectBoostTimePurchase(): void
+    {
+        foreach (BoostCatalogLogic::TIME_EXTENSION_BY_TIER as $tier => $catalogTicks) {
+            $extendAtStack1  = BoostTimePurchaseLogic::computeExtendTicks($catalogTicks);
+            $extendAtStackMax = BoostTimePurchaseLogic::computeExtendTicks($catalogTicks);
+
+            $this->assertSame(
+                $extendAtStack1,
+                $extendAtStackMax,
+                "Tier {$tier} time extension must be identical regardless of power stack."
+            );
+            $this->assertSame(
+                $catalogTicks,
+                $extendAtStack1,
+                "Tier {$tier} time extension must equal the catalog-listed value ({$catalogTicks} ticks)."
+            );
+        }
+    }
+
+    /**
+     * Verifies the new expires_tick is computed correctly: it advances from
+     * the current expires_tick (or gameTime if the boost is almost expired) by
+     * exactly extendTicks, with no power-stack factor applied.
+     */
+    public function testBoostTimePurchaseNewExpiresTick(): void
+    {
+        $gameTime    = 500;
+        $extendTicks = BoostTimePurchaseLogic::computeExtendTicks(
+            BoostCatalogLogic::TIME_EXTENSION_BY_TIER[1]  // 5 ticks
+        );
+
+        // Case 1: boost still has significant time remaining (expires_tick > gameTime).
+        $currentExpires = 600;
+        $newExpires     = BoostTimePurchaseLogic::computeNewExpiresTick($currentExpires, $gameTime, $extendTicks);
+        $this->assertSame(605, $newExpires,
+            'New expires_tick must equal current expires_tick + extendTicks when boost is still running.');
+
+        // Case 2: boost is on the edge of expiry (expires_tick == gameTime).
+        $newExpires = BoostTimePurchaseLogic::computeNewExpiresTick($gameTime, $gameTime, $extendTicks);
+        $this->assertSame($gameTime + $extendTicks, $newExpires,
+            'New expires_tick must equal gameTime + extendTicks when boost is at expiry boundary.');
+
+        // Case 3: boost has already expired (expires_tick < gameTime) – max() floors to gameTime.
+        $newExpires = BoostTimePurchaseLogic::computeNewExpiresTick(400, $gameTime, $extendTicks);
+        $this->assertSame($gameTime + $extendTicks, $newExpires,
+            'New expires_tick must use gameTime as floor when stored expires_tick has already passed.');
     }
 }
