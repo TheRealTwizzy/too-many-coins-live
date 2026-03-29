@@ -153,7 +153,7 @@ class TickEngine {
                 $netRateFp   = (int)$rates['net_rate_fp'];
                 $sinkPerTick = (int)$rates['sink_per_tick'];
 
-                // Carry accumulates against effective net rate; when net is 0, carry stays 0.
+                // Carry accumulates against effective net rate; when net is 0, carry does not increase (existing fractional carry, if any, is preserved).
                 $carryFp = max(0, (int)($p['coins_fractional_fp'] ?? 0));
                 $totalNetFp = ($netRateFp * $ticksToProcess) + $carryFp;
                 [$netCoins, $newCarryFp] = Economy::splitFixedPoint($totalNetFp);
