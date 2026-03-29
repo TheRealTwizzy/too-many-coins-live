@@ -70,6 +70,46 @@ define('SIGIL_PITY_TICKS', ticks_from_real_seconds(120000));
 define('SIGIL_MAX_DROPS_WINDOW', 8);
 define('SIGIL_DROP_WINDOW_TICKS', ticks_from_real_seconds(86400));
 
+// Per-player dynamic sigil drop rate configuration
+//
+// Inventory-based dampening:
+//   For every SIGIL_INVENTORY_ADJ_THRESHOLD sigils of a given tier already owned, that
+//   tier's conditional drop odds are reduced by SIGIL_INVENTORY_ADJ_STEP_FP (parts per
+//   1,000,000), up to a maximum of SIGIL_INVENTORY_ADJ_MAX_STEPS reductions.  This
+//   prevents a single tier from over-dropping once a player has accumulated many of them
+//   while still keeping drops the primary sigil acquisition source.
+define('SIGIL_INVENTORY_ADJ_THRESHOLD', 5);    // Trigger every N same-tier sigils owned
+define('SIGIL_INVENTORY_ADJ_STEP_FP',   10000); // Reduce odds by 1% (10,000 / 1,000,000) per trigger
+define('SIGIL_INVENTORY_ADJ_MAX_STEPS', 10);   // Cap: maximum 10 triggers (≤10% total reduction per tier)
+
+// Boost-based drop frequency adjustment:
+//   An active boost modifier (expressed as a fixed-point value where FP_SCALE = 1,000,000
+//   represents 100%) reduces the Bernoulli denominator, directly increasing drop frequency.
+//   Every SIGIL_BOOST_DROP_RATE_STEP_FP of boost lowers the denominator by 1, capped at
+//   SIGIL_BOOST_DROP_RATE_MAX_BONUS total reduction.  Example: with a 40% boost the
+//   denominator drops from 13 to 11 (~9.09% vs ~7.69% base rate).
+define('SIGIL_BOOST_DROP_RATE_STEP_FP',  200000); // 20% boost per denominator-reduction step
+define('SIGIL_BOOST_DROP_RATE_MAX_BONUS', 3);      // Maximum denominator reduction from boosts
+
+// Per-tier conditional-odds bounds (parts per 1,000,000).
+// Dynamic adjustments are clamped within [MIN, MAX] for each tier, then monotonic
+// ordering (T1 >= T2 >= T3 >= T4 >= T5) is enforced so lower-tier sigils can never
+// become rarer than higher-tier sigils.
+define('SIGIL_TIER_ODDS_MIN', [
+    1 => 200000,  // T1 (Common)    – never below 20% of conditional drops
+    2 => 100000,  // T2 (Uncommon)  – never below 10%
+    3 =>  75000,  // T3 (Rare)      – never below  7.5%
+    4 =>  50000,  // T4 (Epic)      – never below  5%
+    5 =>  25000,  // T5 (Legendary) – never below  2.5%
+]);
+define('SIGIL_TIER_ODDS_MAX', [
+    1 => 600000,  // T1 – never above 60% of conditional drops
+    2 => 500000,  // T2 – never above 50%
+    3 => 400000,  // T3 – never above 40%
+    4 => 300000,  // T4 – never above 30%
+    5 => 200000,  // T5 – never above 20%
+]);
+
 // Sigil progression and crafting
 define('SIGIL_MAX_TIER', 6);
 define('SIGIL_COMBINE_RECIPES', [

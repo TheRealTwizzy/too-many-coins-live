@@ -370,39 +370,170 @@ class Economy {
     }
     
     /**
-     * Process Sigil drop for a player
-    * Returns tier number (1-5) or 0 for no drop.
-    * Tier odds are shifted by sigil power, but Tier 6 is never randomly dropped.
+     * Compute per-player sigil drop configuration.
+     *
+     * Returns an array with:
+     *   'drop_rate' => int   – Bernoulli denominator (1-in-N chance per eligible tick)
+     *   'tier_odds' => int[] – Conditional per-tier odds (parts per 1,000,000, sum = 1,000,000)
+     *
+     * How per-player dynamic rates are computed:
+     *  1. Power-adjusted baseline odds are obtained from adjustedSigilTierOdds(), which
+     *     already blends SIGIL_TIER_ODDS toward SIGIL_TIER_ODDS_MAX_POWER based on the
+     *     player's total sigil power (higher power → lower base drop frequency).
+     *  2. Inventory-based dampening: for each tier T, the player's current sigils_tT count
+     *     is divided by SIGIL_INVENTORY_ADJ_THRESHOLD. Each whole step reduces that tier's
+     *     conditional odds by SIGIL_INVENTORY_ADJ_STEP_FP, capped at
+     *     SIGIL_INVENTORY_ADJ_MAX_STEPS steps. This prevents over-dropping a tier the
+     *     player already has many of.
+     *  3. Per-tier clamping: each tier's odds are clamped within the configured
+     *     [SIGIL_TIER_ODDS_MIN[tier], SIGIL_TIER_ODDS_MAX[tier]] bounds.
+     *  4. Monotonic ordering enforcement: for every adjacent pair, odds[T] is capped at
+     *     odds[T-1] so lower-tier sigils can never be rarer than higher-tier sigils.
+     *  5. Renormalization: values are scaled proportionally so their sum equals exactly
+     *     1,000,000; a rounding remainder is applied to T1.
+     *  6. Boost-based drop frequency: the Bernoulli denominator (from sigilDropRateForPower)
+     *     is reduced by 1 for every SIGIL_BOOST_DROP_RATE_STEP_FP of active boost modifier,
+     *     capped at SIGIL_BOOST_DROP_RATE_MAX_BONUS, increasing overall drop frequency for
+     *     players with active boosts.
+     *
+     * Balancing assumptions:
+     *  - Drops remain the primary sigil acquisition source; the vault provides a secondary
+     *    path at significant star cost, and combining provides a tertiary upgrade path.
+     *  - The inventory dampening is mild enough (≤10% reduction per tier) that drops always
+     *    dominate over vault purchases under normal play.
+     *  - Cross-tier scaling ensures T1 >= T2 >= T3 >= T4 >= T5 at every evaluation.
+     *
+     * @param array $player     Season-participation row (must include sigils_t1…sigils_t5 fields).
+     * @param int   $boostModFp Combined boost modifier in fixed-point (FP_SCALE = 1,000,000 → 100%).
+     * @return array{drop_rate: int, tier_odds: array<int,int>}
      */
-    public static function processSigilDrop($season, $playerId, $seasonTick, $sigilPower = 0) {
+    public static function computePerPlayerSigilDropConfig($player, $boostModFp = 0) {
+        $sigilPower = self::calculateSigilPower($player);
+
+        // Step 1: Power-adjusted baseline tier odds (sum = 1,000,000)
+        $tierOdds = self::adjustedSigilTierOdds($sigilPower);
+
+        $minOdds = SIGIL_TIER_ODDS_MIN;
+        $maxOdds = SIGIL_TIER_ODDS_MAX;
+
+        // Step 2: Per-tier inventory-based dampening
+        $adjThreshold = max(1, (int)SIGIL_INVENTORY_ADJ_THRESHOLD);
+        $adjStepFp    = max(0, (int)SIGIL_INVENTORY_ADJ_STEP_FP);
+        $adjMaxSteps  = max(0, (int)SIGIL_INVENTORY_ADJ_MAX_STEPS);
+
+        foreach ($tierOdds as $tier => $odds) {
+            $col    = 'sigils_t' . $tier;
+            $count  = (int)($player[$col] ?? 0);
+            $steps  = min($adjMaxSteps, intdiv($count, $adjThreshold));
+            $tierOdds[$tier] = $odds - ($steps * $adjStepFp);
+        }
+
+        // Step 3: Clamp each tier within configured [min, max] bounds
+        foreach ($tierOdds as $tier => $odds) {
+            $lo = (int)($minOdds[$tier] ?? 0);
+            $hi = (int)($maxOdds[$tier] ?? 1000000);
+            $tierOdds[$tier] = self::clamp($odds, $lo, $hi);
+        }
+
+        // Step 4: Enforce monotonic ordering – T1 >= T2 >= T3 >= T4 >= T5
+        // Lower-tier sigils (T1) must never become rarer than higher-tier sigils (T5).
+        $tiers = array_keys($tierOdds);
+        sort($tiers); // [1, 2, 3, 4, 5]
+        for ($i = 1; $i < count($tiers); $i++) {
+            $prev = $tiers[$i - 1];
+            $curr = $tiers[$i];
+            if ($tierOdds[$curr] > $tierOdds[$prev]) {
+                $tierOdds[$curr] = $tierOdds[$prev];
+            }
+        }
+
+        // Step 5: Renormalize to exactly 1,000,000
+        $sum = array_sum($tierOdds);
+        if ($sum <= 0) {
+            // Safety fallback: return unmodified base odds
+            $tierOdds = SIGIL_TIER_ODDS;
+        } else {
+            // Proportional scaling to preserve relative ratios, then fix rounding on T1
+            $scaled = [];
+            foreach ($tierOdds as $tier => $odds) {
+                $scaled[$tier] = intdiv($odds * 1000000, $sum);
+            }
+            $scaledSum = array_sum($scaled);
+            $scaled[$tiers[0]] = max(0, $scaled[$tiers[0]] + (1000000 - $scaledSum));
+            $tierOdds = $scaled;
+
+            // Re-enforce monotonic ordering after the rounding delta on T1
+            for ($i = 1; $i < count($tiers); $i++) {
+                $prev = $tiers[$i - 1];
+                $curr = $tiers[$i];
+                if ($tierOdds[$curr] > $tierOdds[$prev]) {
+                    $tierOdds[$curr] = $tierOdds[$prev];
+                }
+            }
+        }
+
+        // Step 6: Boost-based drop frequency adjustment (lower denominator = more drops)
+        $dropRate = self::sigilDropRateForPower($sigilPower);
+        $boostMod = max(0, (int)$boostModFp);
+        $stepFp   = max(1, (int)SIGIL_BOOST_DROP_RATE_STEP_FP);
+        $maxBonus = max(0, (int)SIGIL_BOOST_DROP_RATE_MAX_BONUS);
+        $bonus    = min($maxBonus, intdiv($boostMod, $stepFp));
+        $dropRate = max(1, $dropRate - $bonus);
+
+        return [
+            'drop_rate' => $dropRate,
+            'tier_odds' => $tierOdds,
+        ];
+    }
+
+    /**
+     * Process Sigil drop for a player.
+     * Returns tier number (1-5) or 0 for no drop.
+     * Tier odds are shifted by sigil power, but Tier 6 is never randomly dropped.
+     *
+     * @param array      $season     Season row (must include season_id and season_seed).
+     * @param int        $playerId   Player identifier (used as RNG input).
+     * @param int        $seasonTick Absolute game-tick (used as RNG input).
+     * @param int        $sigilPower Legacy sigil-power scalar; ignored when $dropConfig provided.
+     * @param array|null $dropConfig Pre-computed per-player config from computePerPlayerSigilDropConfig().
+     *                               When supplied, $sigilPower is not used.
+     */
+    public static function processSigilDrop($season, $playerId, $seasonTick, $sigilPower = 0, array $dropConfig = null) {
         // Deterministic RNG using SHA-256.
         // Use 'J' (unsigned 64-bit big-endian) instead of 'P' (machine byte-order) so
         // the hash input is identical on every platform/PHP build.
         $seed = $season['season_seed'];
         $input = pack('J', $season['season_id']) . pack('J', $seasonTick) . $seed . pack('J', $playerId);
         $hash = hash('sha256', $input, true);
-        
+
         // Use 'N' (unsigned 32-bit big-endian) for both extractions: portable across all
         // PHP platforms unlike 'P' (machine byte-order 64-bit). A 32-bit range
         // (0–4,294,967,295) is far larger than SIGIL_DROP_RATE and 1,000,000,
         // so the modulo distribution is effectively uniform.
 
-        // Bernoulli trial: bytes 0-3 mod drop-rate denominator (power-scaled)
-        $dropRate = self::sigilDropRateForPower($sigilPower);
-        $trial = unpack('N', substr($hash, 0, 4))[1] % $dropRate;
-        
+        // Resolve drop rate and tier odds from per-player config or legacy sigil power.
+        if ($dropConfig !== null) {
+            $dropRate = (int)$dropConfig['drop_rate'];
+            $tierOdds = $dropConfig['tier_odds'];
+        } else {
+            $dropRate = self::sigilDropRateForPower($sigilPower);
+            $tierOdds = self::adjustedSigilTierOdds($sigilPower);
+        }
+
+        // Bernoulli trial: bytes 0-3 mod drop-rate denominator (power/boost-scaled)
+        $trial = unpack('N', substr($hash, 0, 4))[1] % max(1, $dropRate);
+
         if ($trial !== 0) return 0; // No drop
-        
+
         // Tier selection: bytes 4-7 mod 1,000,000 (matches SIGIL_TIER_ODDS fixed-point scale)
         $tierRoll = unpack('N', substr($hash, 4, 4))[1] % 1000000;
-        
+
         $cumulative = 0;
-        $tierOdds = self::adjustedSigilTierOdds($sigilPower);
         foreach ($tierOdds as $tier => $odds) {
             $cumulative += $odds;
             if ($tierRoll < $cumulative) return $tier;
         }
-        
+
         return 1; // Fallback
     }
 }

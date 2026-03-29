@@ -127,15 +127,17 @@ class TickEngine {
             foreach ($participants as $p) {
                 $playerId = $p['player_id'];
                 
-                // Phase 3: Sigil drop evaluation (not on last-valid or expiration)
-                if (!$isLastValid && !$isExpiration) {
-                    self::processSigilDrops($season, $p, $seasonId, $gameTime, $currentSeasonTick, $ticksToProcess, $startTime, $lastSeasonTick);
-                }
-                
-                // Phase 5: UBI accrual with boost modifiers
+                // Compute boost modifier once per player; used for both sigil drops and UBI.
                 $selfBoosts = self::getActivePlayerBoosts($playerId, $seasonId, $gameTime);
                 $boostModFp = self::calculateBoostModifier($selfBoosts, $globalBoosts);
                 $isFrozen = self::isPlayerFrozen($playerId, $seasonId, $gameTime);
+                
+                // Phase 3: Sigil drop evaluation (not on last-valid or expiration)
+                if (!$isLastValid && !$isExpiration) {
+                    self::processSigilDrops($season, $p, $seasonId, $gameTime, $currentSeasonTick, $ticksToProcess, $startTime, $lastSeasonTick, $boostModFp);
+                }
+                
+                // Phase 5: UBI accrual with boost modifiers
                 
                 $baseUbi = Economy::calculateUBI($season, $p, $p);
                 $ratePerTickFp = Economy::toFixedPoint($baseUbi);
