@@ -122,8 +122,10 @@ class TickEngine {
             // Get active global boosts for UBI modifier calculation
             $globalBoosts = self::getActiveGlobalBoosts($seasonId, $gameTime);
             
-            $totalNewCoins = 0;
+            $totalNewCoins    = 0;
             $totalBurnedCoins = 0;
+            $coinsActiveTotal = 0;
+            $coinsIdleTotal   = 0;
             
             foreach ($participants as $p) {
                 $playerId = $p['player_id'];
@@ -170,8 +172,16 @@ class TickEngine {
                     "UPDATE season_participation SET coins = GREATEST(0, coins + ?), coins_fractional_fp = ?, hoarding_sink_total = hoarding_sink_total + ? WHERE player_id = ? AND season_id = ?",
                     [$netCoins, $newCarryFp, $totalSink, $playerId, $seasonId]
                 );
-                $totalNewCoins += $netCoins;
+                $totalNewCoins    += $netCoins;
                 $totalBurnedCoins += $totalSink;
+
+                // Accumulate active/idle coin totals (post-UBI balance) for pricing telemetry.
+                $postTickCoins = max(0, ((int)($p['coins'] ?? 0)) + $netCoins);
+                if (($p['activity_state'] ?? 'Idle') === 'Active') {
+                    $coinsActiveTotal += $postTickCoins;
+                } else {
+                    $coinsIdleTotal += $postTickCoins;
+                }
                 
                 // Update participation tracking
                 $activeTicks = ($p['activity_state'] === 'Active') ? $ticksToProcess : 0;
@@ -210,17 +220,51 @@ class TickEngine {
                 }
             }
             
-            // Phase 6: Update season supply and star price
+            // Phase 6: Update season supply and star price.
+            //
+            // Supply accounting fix: the previous implementation passed params
+            // ($totalNewCoins + $totalBurnedCoins) and $totalBurnedCoins to a single UPDATE
+            // SET that updated both total_coins_supply and total_coins_supply_end_of_tick.
+            // Due to MySQL's left-to-right SET evaluation, total_coins_supply_end_of_tick
+            // referenced the already-updated total_coins_supply, causing the net delta to
+            // be applied twice and end_of_tick supply to drift above the true supply each tick.
+            //
+            // Fix: compute final supply value in PHP so both fields receive the same value.
+            // Net delta = $totalNewCoins (gross minted minus the sink already absorbed into
+            // the net rate; $totalBurnedCoins is the accounting-only sink metric).
+            $grossMinted   = $totalNewCoins + $totalBurnedCoins; // used for traceability logging only
+            $netCoinsDelta = $totalNewCoins; // = grossMinted - totalBurnedCoins
+            $currentSupply = (int)$season['total_coins_supply'];
+            $newSupply     = max(0, $currentSupply + $netCoinsDelta);
+
+            error_log(sprintf(
+                '[TMC][tick=%d][season=%d] supply: minted=%d burned=%d net_delta=%d new_supply=%d',
+                $gameTime, $seasonId, $grossMinted, $totalBurnedCoins, $netCoinsDelta, $newSupply
+            ));
+
+            // Compute effective_price_supply for active-weighted pricing.
+            $activeOnly  = (int)($season['starprice_active_only']   ?? 0);
+            $idleWeightFp = (int)($season['starprice_idle_weight_fp'] ?? 250000);
+            if ($activeOnly) {
+                $effectivePriceSupply = max(0, $coinsActiveTotal);
+            } else {
+                $effectivePriceSupply = max(0, $coinsActiveTotal + Economy::fpMultiply($coinsIdleTotal, $idleWeightFp));
+            }
+
             $db->query(
-                "UPDATE seasons SET 
-                 total_coins_supply = GREATEST(0, total_coins_supply + ? - ?),
-                 total_coins_supply_end_of_tick = GREATEST(0, total_coins_supply + ? - ?),
+                "UPDATE seasons SET
+                 total_coins_supply = ?,
+                 total_coins_supply_end_of_tick = ?,
+                 coins_active_total = ?,
+                 coins_idle_total = ?,
+                 effective_price_supply = ?,
                  last_processed_tick = ?
                  WHERE season_id = ?",
-                [$totalNewCoins + $totalBurnedCoins, $totalBurnedCoins, $totalNewCoins + $totalBurnedCoins, $totalBurnedCoins, $gameTime, $seasonId]
+                [$newSupply, $newSupply, $coinsActiveTotal, $coinsIdleTotal, $effectivePriceSupply, $gameTime, $seasonId]
             );
             
-            // Recalculate star price
+            // Recalculate star price using updated season data (includes effective_price_supply
+            // and current_star_price as the previous-price reference for velocity clamping).
             $updatedSeason = $db->fetch("SELECT * FROM seasons WHERE season_id = ?", [$seasonId]);
             $newPrice = Economy::calculateStarPrice($updatedSeason);
             $db->query(

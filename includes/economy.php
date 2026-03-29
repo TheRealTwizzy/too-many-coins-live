@@ -413,15 +413,45 @@ class Economy {
     }
     
     /**
-     * Calculate star price based on total coin supply
+     * Calculate star price based on effective coin supply with velocity clamps.
+     *
+     * Supply selection (when $totalCoinsEndOfTick is not provided):
+     *   - Uses season.effective_price_supply if > 0 (active-weighted or active-only mode).
+     *   - Falls back to total_coins_supply_end_of_tick for backward compatibility.
+     *
+     * Velocity clamp (applied after raw table lookup, before hard cap/floor):
+     *   - season.starprice_max_upstep_fp: max upward movement per tick (fp, vs previous price).
+     *   - season.starprice_max_downstep_fp: max downward movement per tick (fp, vs previous price).
+     *   - Hard cap (star_price_cap) and floor (1) are preserved as final guardrails.
      */
     public static function calculateStarPrice($season, $totalCoinsEndOfTick = null) {
         if ($totalCoinsEndOfTick === null) {
-            $totalCoinsEndOfTick = (int)$season['total_coins_supply_end_of_tick'];
+            $effectiveSupply = (int)($season['effective_price_supply'] ?? 0);
+            $totalCoinsEndOfTick = ($effectiveSupply > 0)
+                ? $effectiveSupply
+                : (int)$season['total_coins_supply_end_of_tick'];
         }
-        
+
         $table = json_decode($season['starprice_table'], true);
         $price = self::piecewiseLinear($totalCoinsEndOfTick, $table, 'm', 'price');
+
+        // Apply per-tick velocity clamp relative to previous price.
+        $prevPrice = (int)($season['current_star_price'] ?? 0);
+        if ($prevPrice > 0) {
+            $maxUpstepFp   = (int)($season['starprice_max_upstep_fp']   ?? 2000);
+            $maxDownstepFp = (int)($season['starprice_max_downstep_fp'] ?? 10000);
+            // At least 1 coin of movement headroom in each direction.
+            // Note: for very small prevPrice values (< 500), intdiv truncates to 0 and
+            // max(1,...) ensures at least 1 coin of movement is always allowed; this
+            // means the effective percentage can exceed the configured step for low prices,
+            // which is intentional to prevent the price from freezing near zero.
+            $maxUp   = max(1, intdiv($prevPrice * $maxUpstepFp,   FP_SCALE));
+            $maxDown = max(1, intdiv($prevPrice * $maxDownstepFp, FP_SCALE));
+            $price   = min($price, $prevPrice + $maxUp);
+            $price   = max($price, $prevPrice - $maxDown);
+        }
+
+        // Hard cap and floor (preserved as final guardrails).
         $price = min($price, (int)$season['star_price_cap']);
         return max(1, $price);
     }
