@@ -408,9 +408,9 @@ class EconomyPrecisionTest extends TestCase
             'gross_rate_fp must be positive for an active participant.');
         $this->assertGreaterThan(0, (int)$rates['sink_per_tick'],
             'sink_per_tick must be positive when hoarding sink fires.');
-        // When sink > 0, net must be strictly less than gross.
-        $this->assertLessThan((int)$rates['gross_rate_fp'], (int)$rates['net_rate_fp'],
-            'net_rate_fp must be less than gross_rate_fp when sink is active.');
+        // When sink > 0, gross must be strictly greater than net.
+        $this->assertGreaterThan((int)$rates['net_rate_fp'], (int)$rates['gross_rate_fp'],
+            'gross_rate_fp must be greater than net_rate_fp when sink is active.');
         // Net must equal max(0, gross - sink_fp).
         $expectedNet = max(0, (int)$rates['gross_rate_fp'] - Economy::toFixedPoint((int)$rates['sink_per_tick']));
         $this->assertSame($expectedNet, (int)$rates['net_rate_fp'],

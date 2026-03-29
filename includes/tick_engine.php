@@ -158,7 +158,10 @@ class TickEngine {
                 $totalNetFp = ($netRateFp * $ticksToProcess) + $carryFp;
                 [$netCoins, $newCarryFp] = Economy::splitFixedPoint($totalNetFp);
 
-                // Sink is tracked for supply accounting; cap to what player can actually lose.
+                // Sink here is an accounting-only metric for supply/hoarding reporting; it is not
+                // directly debited from the player's balance in this block. Cap it to the amount
+                // the player could have actually lost this tick so reported sink never exceeds
+                // the maximum burnable balance.
                 $totalSink = max(0, $sinkPerTick * $ticksToProcess);
                 $maxBurnable = max(0, ((int)($p['coins'] ?? 0)) + $netCoins);
                 $totalSink = min($totalSink, $maxBurnable);
