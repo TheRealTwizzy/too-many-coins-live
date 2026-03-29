@@ -78,6 +78,16 @@ CREATE TABLE IF NOT EXISTS seasons (
     hoarding_window_ticks INT NOT NULL DEFAULT 86400,
     target_spend_rate_per_tick BIGINT NOT NULL DEFAULT 50,
     hoarding_min_factor_fp INT NOT NULL DEFAULT 100000,  -- 0.1
+    hoarding_sink_enabled TINYINT(1) NOT NULL DEFAULT 0,
+    hoarding_safe_hours INT NOT NULL DEFAULT 12,
+    hoarding_safe_min_coins BIGINT NOT NULL DEFAULT 20000,
+    hoarding_tier1_excess_cap BIGINT NOT NULL DEFAULT 50000,
+    hoarding_tier2_excess_cap BIGINT NOT NULL DEFAULT 200000,
+    hoarding_tier1_rate_hourly_fp INT NOT NULL DEFAULT 200,
+    hoarding_tier2_rate_hourly_fp INT NOT NULL DEFAULT 500,
+    hoarding_tier3_rate_hourly_fp INT NOT NULL DEFAULT 1000,
+    hoarding_sink_cap_ratio_fp INT NOT NULL DEFAULT 350000,
+    hoarding_idle_multiplier_fp INT NOT NULL DEFAULT 1250000,
     starprice_table JSON NOT NULL,
     star_price_cap BIGINT NOT NULL DEFAULT 10000,
     trade_fee_tiers JSON NOT NULL,
@@ -136,6 +146,7 @@ CREATE TABLE IF NOT EXISTS season_participation (
     last_exit_at BIGINT DEFAULT NULL,
     -- Spend tracking for hoarding suppression
     spend_window_total BIGINT NOT NULL DEFAULT 0,
+    hoarding_sink_total BIGINT NOT NULL DEFAULT 0,
     -- Lock-In snapshot
     lock_in_effect_tick BIGINT DEFAULT NULL,
     lock_in_snapshot_seasonal_stars BIGINT DEFAULT NULL,

@@ -57,6 +57,69 @@ class EconomyPrecisionTest extends TestCase
         $this->assertSame(400000, $carryAfterTwoTicks);
     }
 
+    public function testCalculateUBIIgnoresHoardingSuppressionForGrossPath(): void
+    {
+        $season = [
+            'base_ubi_active_per_tick' => 30,
+            'base_ubi_idle_factor_fp' => 250000,
+            'ubi_min_per_tick' => 1,
+            'total_coins_supply' => 0,
+            'inflation_table' => json_encode([
+                ['x' => 0, 'factor_fp' => 1000000],
+                ['x' => 1000000, 'factor_fp' => 1000000],
+            ]),
+            'hoarding_min_factor_fp' => 90000,
+            'target_spend_rate_per_tick' => 999999,
+        ];
+
+        $player = [
+            'participation_enabled' => 1,
+            'activity_state' => 'Active',
+        ];
+
+        $participation = [
+            'spend_window_total' => 0,
+        ];
+
+        $this->assertSame(30, Economy::calculateUBI($season, $player, $participation));
+    }
+
+    public function testHoardingSinkIsZeroWhenFeatureDisabled(): void
+    {
+        $season = [
+            'hoarding_sink_enabled' => 0,
+        ];
+        $player = ['activity_state' => 'Active'];
+        $participation = ['coins' => 999999];
+
+        $sink = Economy::calculateHoardingSinkCoinsPerTick($season, $player, $participation, Economy::toFixedPoint(100));
+        $this->assertSame(0, $sink);
+    }
+
+    public function testHoardingSinkUsesTiersIdleMultiplierAndCap(): void
+    {
+        $season = [
+            'hoarding_sink_enabled' => 1,
+            'hoarding_safe_hours' => 0,
+            'hoarding_safe_min_coins' => 0,
+            'hoarding_tier1_excess_cap' => 50000,
+            'hoarding_tier2_excess_cap' => 200000,
+            'hoarding_tier1_rate_hourly_fp' => 60000,
+            'hoarding_tier2_rate_hourly_fp' => 120000,
+            'hoarding_tier3_rate_hourly_fp' => 240000,
+            'hoarding_idle_multiplier_fp' => 1250000,
+            'hoarding_sink_cap_ratio_fp' => 200000, // 20% of gross coins/tick
+        ];
+        $player = ['activity_state' => 'Idle'];
+        $participation = ['coins' => 1000000];
+        $grossRateFp = Economy::toFixedPoint(50);
+
+        $sink = Economy::calculateHoardingSinkCoinsPerTick($season, $player, $participation, $grossRateFp);
+
+        // Cap is floor(50 * 0.20) = 10 coins/tick.
+        $this->assertSame(10, $sink);
+    }
+
     public function testEffectiveSigilTierChanceMatchesConfigMath(): void
     {
         $basePercent = 100 / Economy::sigilDropRateForPower(0);

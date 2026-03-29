@@ -504,20 +504,40 @@ function getSigilDropRateMetadataFromConfig(array $dropConfig) {
 }
 
 function calculatePlayerRatePerTick($season, $player, $participation, $activeBoosts) {
-    if (!$season || !$participation) return 0;
+    if (!$season || !$participation) {
+        return [
+            'rate_per_tick' => 0,
+            'gross_rate_per_tick' => 0,
+            'hoarding_sink_per_tick' => 0,
+            'net_rate_per_tick' => 0,
+            'hoarding_sink_active' => false,
+        ];
+    }
     if (isPlayerFrozen((int)$player['player_id'], (int)$season['season_id'])) {
-        return 0;
+        return [
+            'rate_per_tick' => 0,
+            'gross_rate_per_tick' => 0,
+            'hoarding_sink_per_tick' => 0,
+            'net_rate_per_tick' => 0,
+            'hoarding_sink_active' => false,
+        ];
     }
 
-    $baseUbi = Economy::calculateUBI($season, $player, $participation);
-    $ratePerTickFp = Economy::toFixedPoint($baseUbi);
     $totalModFp = (int)($activeBoosts['total_modifier_fp'] ?? 0);
+    $rates = Economy::calculateRateBreakdown($season, $player, $participation, $totalModFp, false);
 
-    $ratePerTickFp = Economy::applyBoostModifierFp($ratePerTickFp, $totalModFp);
-    $ratePerTickFp += Economy::guaranteedBoostFloorFp($totalModFp);
-    $ratePerTick = round($ratePerTickFp / FP_SCALE, 2);
+    $grossRate = round(((int)$rates['gross_rate_fp']) / FP_SCALE, 2);
+    $sinkPerTick = max(0, (int)$rates['sink_per_tick']);
+    $netRate = round(((int)$rates['net_rate_fp']) / FP_SCALE, 2);
 
-    return max(0, $ratePerTick);
+    return [
+        // Preserve legacy key as player-facing gross rate.
+        'rate_per_tick' => max(0, $grossRate),
+        'gross_rate_per_tick' => max(0, $grossRate),
+        'hoarding_sink_per_tick' => $sinkPerTick,
+        'net_rate_per_tick' => max(0, $netRate),
+        'hoarding_sink_active' => Economy::hoardingSinkEnabled($season) && $sinkPerTick > 0,
+    ];
 }
 
 function getGameState($player) {
@@ -570,7 +590,7 @@ function getGameState($player) {
         }
 
         $activeBoosts = getActiveBoosts($player);
-        $ratePerTick = calculatePlayerRatePerTick($joinedSeason, $player, $participation, $activeBoosts);
+        $rateMetrics = calculatePlayerRatePerTick($joinedSeason, $player, $participation, $activeBoosts);
         
         $state['player'] = [
             'player_id' => $player['player_id'],
@@ -602,7 +622,11 @@ function getGameState($player) {
                 'tier6_visible' => shouldRevealTier6($participation),
                 'can_freeze' => ((int)($participation['sigils_t6'] ?? 0) > 0),
                 'freeze' => getFreezeStatusForPlayer((int)$player['player_id'], (int)$player['joined_season_id']),
-                'rate_per_tick' => $ratePerTick,
+                'rate_per_tick' => (float)$rateMetrics['rate_per_tick'],
+                'gross_rate_per_tick' => (float)$rateMetrics['gross_rate_per_tick'],
+                'hoarding_sink_per_tick' => (int)$rateMetrics['hoarding_sink_per_tick'],
+                'net_rate_per_tick' => (float)$rateMetrics['net_rate_per_tick'],
+                'hoarding_sink_active' => (bool)$rateMetrics['hoarding_sink_active'],
             ] : null,
             'active_boosts' => $activeBoosts,
             'recent_drops' => ($player['joined_season_id']) ? getRecentSigilDrops($player) : [],

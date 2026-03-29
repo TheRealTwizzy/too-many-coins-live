@@ -191,6 +191,20 @@ class Economy {
         $rawFp = intdiv($playerSpendWindowAvg * FP_SCALE, $target);
         return self::clamp($rawFp, (int)$season['hoarding_min_factor_fp'], FP_SCALE);
     }
+
+    /**
+     * Game ticks that elapse in one real-world hour.
+     */
+    public static function ticksPerRealHour() {
+        return max(1, (int)ceil((3600 * TIME_SCALE) / max(1, TICK_REAL_SECONDS)));
+    }
+
+    /**
+     * Whether explicit hoarding sink is enabled for the season.
+     */
+    public static function hoardingSinkEnabled($season) {
+        return ((int)($season['hoarding_sink_enabled'] ?? 0)) === 1;
+    }
     
     /**
      * Calculate UBI for a player on a given tick
@@ -217,19 +231,105 @@ class Economy {
         $inflationFp = self::inflationFactor($season, $totalSupply);
         $ubi = self::fpMultiply($ubi, $inflationFp);
         
-        // Apply hoarding suppression
-        $spendWindow = isset($participation['spend_window_total']) ? (int)$participation['spend_window_total'] : 0;
-        $W = (int)$season['hoarding_window_ticks'];
-        $awspd = $W > 0 ? intdiv($spendWindow, $W) : 0;
-        $hoardFp = self::hoardingFactor($season, $awspd);
-        $ubi = self::fpMultiply($ubi, $hoardFp);
-        
         // Apply minimum floor
         $minUbi = (int)$season['ubi_min_per_tick'];
         $ubi = max($ubi, $minUbi);
         
         // Ensure non-negative
         return max(0, $ubi);
+    }
+
+    /**
+     * Gross per-tick rate in fixed point after boost modifier and guaranteed boost floor.
+     */
+    public static function calculateGrossRatePerTickFp($season, $player, $participation, $boostModFp, $isLockInTick = false) {
+        $baseUbi = self::calculateUBI($season, $player, $participation, $isLockInTick);
+        $ratePerTickFp = self::toFixedPoint($baseUbi);
+        $ratePerTickFp = self::applyBoostModifierFp($ratePerTickFp, (int)$boostModFp);
+        $ratePerTickFp += self::guaranteedBoostFloorFp((int)$boostModFp);
+        return max(0, (int)$ratePerTickFp);
+    }
+
+    /**
+     * Calculate explicit hoarding sink in whole coins per tick.
+     */
+    public static function calculateHoardingSinkCoinsPerTick($season, $player, $participation, $grossRatePerTickFp) {
+        if (!self::hoardingSinkEnabled($season)) return 0;
+        if (!$participation) return 0;
+
+        $coinsHeld = max(0, (int)($participation['coins'] ?? 0));
+        if ($coinsHeld <= 0) return 0;
+
+        $ticksPerHour = self::ticksPerRealHour();
+        $safeHours = max(0, (int)($season['hoarding_safe_hours'] ?? 12));
+        $safeMinCoins = max(0, (int)($season['hoarding_safe_min_coins'] ?? 20000));
+        $grossCoinsPerTick = max(0, intdiv(max(0, (int)$grossRatePerTickFp), FP_SCALE));
+        $dynamicSafeCoins = $safeHours * $grossCoinsPerTick * $ticksPerHour;
+        $safeBufferCoins = max($safeMinCoins, $dynamicSafeCoins);
+
+        $excess = max(0, $coinsHeld - $safeBufferCoins);
+        if ($excess <= 0) return 0;
+
+        $tier1Cap = max(0, (int)($season['hoarding_tier1_excess_cap'] ?? 50000));
+        $tier2Cap = max(0, (int)($season['hoarding_tier2_excess_cap'] ?? 200000));
+        $tier1RateFp = max(0, (int)($season['hoarding_tier1_rate_hourly_fp'] ?? 200));
+        $tier2RateFp = max(0, (int)($season['hoarding_tier2_rate_hourly_fp'] ?? 500));
+        $tier3RateFp = max(0, (int)($season['hoarding_tier3_rate_hourly_fp'] ?? 1000));
+
+        $tier1Excess = ($tier1Cap > 0) ? min($excess, $tier1Cap) : 0;
+        $remaining = max(0, $excess - $tier1Excess);
+        $tier2Excess = ($tier2Cap > 0) ? min($remaining, $tier2Cap) : 0;
+        $tier3Excess = max(0, $remaining - $tier2Excess);
+
+        $denominator = FP_SCALE * $ticksPerHour;
+        $sinkPerTick = 0;
+        if ($tier1Excess > 0 && $tier1RateFp > 0) {
+            $sinkPerTick += intdiv($tier1Excess * $tier1RateFp, $denominator);
+        }
+        if ($tier2Excess > 0 && $tier2RateFp > 0) {
+            $sinkPerTick += intdiv($tier2Excess * $tier2RateFp, $denominator);
+        }
+        if ($tier3Excess > 0 && $tier3RateFp > 0) {
+            $sinkPerTick += intdiv($tier3Excess * $tier3RateFp, $denominator);
+        }
+
+        if ($sinkPerTick <= 0) return 0;
+
+        if (($player['activity_state'] ?? 'Active') !== 'Active') {
+            $idleMultFp = max(0, (int)($season['hoarding_idle_multiplier_fp'] ?? FP_SCALE));
+            $sinkPerTick = intdiv($sinkPerTick * $idleMultFp, FP_SCALE);
+        }
+
+        $capRatioFp = max(0, (int)($season['hoarding_sink_cap_ratio_fp'] ?? 350000));
+        if ($capRatioFp > 0) {
+            $capCoinsPerTick = intdiv(max(0, (int)$grossRatePerTickFp) * $capRatioFp, FP_SCALE * FP_SCALE);
+            $sinkPerTick = min($sinkPerTick, $capCoinsPerTick);
+        }
+
+        return max(0, min((int)$sinkPerTick, $coinsHeld));
+    }
+
+    /**
+     * Compute gross/sink/net rates used by tick processing and API presentation.
+     */
+    public static function calculateRateBreakdown($season, $player, $participation, $boostModFp, $isFrozen = false, $isLockInTick = false) {
+        if ($isFrozen) {
+            return [
+                'gross_rate_fp' => 0,
+                'sink_per_tick' => 0,
+                'net_rate_fp' => 0,
+            ];
+        }
+
+        $grossRateFp = self::calculateGrossRatePerTickFp($season, $player, $participation, $boostModFp, $isLockInTick);
+        $sinkPerTick = self::calculateHoardingSinkCoinsPerTick($season, $player, $participation, $grossRateFp);
+        $netRateFp = max(0, $grossRateFp - self::toFixedPoint($sinkPerTick));
+
+        return [
+            'gross_rate_fp' => $grossRateFp,
+            'sink_per_tick' => $sinkPerTick,
+            'net_rate_fp' => $netRateFp,
+        ];
     }
     
     /**
