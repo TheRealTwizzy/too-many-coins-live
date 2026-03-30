@@ -808,10 +808,11 @@ function getLeaderboard($seasonId) {
     $status = GameTime::getSeasonStatus($season);
     if ($status === 'Active' || $status === 'Blackout') {
         $gameTime = GameTime::now();
-        return $db->fetchAll(
+        $rows = $db->fetchAll(
             "SELECT p.player_id, p.handle,
                     COALESCE(sp.seasonal_stars, 0) AS seasonal_stars,
                     COALESCE(sp.coins, 0) AS coins,
+                    sp.participation_time_total,
                     sp.final_rank,
                     sp.lock_in_effect_tick,
                     COALESCE(sp.end_membership, 0) AS end_membership,
@@ -827,6 +828,10 @@ function getLeaderboard($seasonId) {
                             4000000
                         ) / 10000, 1
                     ) AS boost_pct
+                    , LEAST(
+                        COALESCE(self_b.self_fp, 0) + glob_b.global_fp,
+                        4000000
+                    ) AS boost_mod_fp
              FROM players p
              LEFT JOIN season_participation sp ON sp.player_id = p.player_id AND sp.season_id = ?
              LEFT JOIN (
@@ -850,9 +855,30 @@ function getLeaderboard($seasonId) {
              ORDER BY COALESCE(sp.seasonal_stars, 0) DESC, p.player_id ASC",
             [$seasonId, $seasonId, $gameTime, $seasonId, $gameTime, $seasonId, $gameTime, $seasonId]
         );
+        foreach ($rows as &$row) {
+            $playerShim = [
+                'participation_enabled' => 1,
+                'activity_state' => $row['activity_state'] ?? 'Offline',
+            ];
+            $participationShim = [
+                'coins' => (int)($row['coins'] ?? 0),
+                'participation_time_total' => (int)($row['participation_time_total'] ?? 0),
+            ];
+            $breakdown = Economy::calculateRateBreakdown(
+                $season,
+                $playerShim,
+                $participationShim,
+                (int)($row['boost_mod_fp'] ?? 0),
+                ((int)($row['is_frozen'] ?? 0) > 0)
+            );
+            $row['rate_per_tick'] = round(((int)$breakdown['gross_rate_fp']) / FP_SCALE, 2);
+            unset($row['boost_mod_fp']);
+        }
+        unset($row);
+        return $rows;
     }
 
-    return $db->fetchAll(
+    $rows = $db->fetchAll(
         "SELECT sp.player_id, p.handle, sp.seasonal_stars, COALESCE(sp.coins, 0) AS coins, sp.final_rank,
                 sp.lock_in_effect_tick, sp.end_membership, sp.badge_awarded,
                 sp.global_stars_earned, sp.participation_bonus, sp.placement_bonus,
@@ -867,6 +893,11 @@ function getLeaderboard($seasonId) {
          LIMIT 100",
         [$seasonId]
     );
+    foreach ($rows as &$row) {
+        $row['rate_per_tick'] = 0;
+    }
+    unset($row);
+    return $rows;
 }
 
 function getGlobalLeaderboard() {

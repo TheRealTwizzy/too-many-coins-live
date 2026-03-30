@@ -28,6 +28,8 @@ const TMC = {
     },
 
     API_BASE: '/api/index.php',
+    _seasonDetailLeaderboardExpanded: false,
+    _globalSeasonalLeaderboardExpanded: false,
 
     // ==================== API ====================
     async api(action, data = {}) {
@@ -255,6 +257,9 @@ const TMC = {
                 this.loadSeasonDetail(data);
                 break;
             case 'global-lb':
+                if (data && data.tab === 'seasonal') {
+                    this.state.leaderboardTab = 'seasonal';
+                }
                 this.loadGlobalLeaderboard();
                 break;
             case 'shop':
@@ -928,11 +933,11 @@ const TMC = {
         // Leaderboard
         html += `
             <div class="season-leaderboard">
-                <h3>Season Leaderboard</h3>
+                <h3><button class="season-lb-title-link" type="button" onclick="TMC.openSeasonalLeaderboardTab()">Season Leaderboard</button></h3>
                 <table class="leaderboard-table">
                     <thead>
                         <tr>
-                            <th>Rank</th>
+                            <th>Rate</th>
                             <th>Player</th>
                             <th>Stars</th>
                             <th>Boost</th>
@@ -944,6 +949,9 @@ const TMC = {
                     <tbody id="season-lb-body">
                     </tbody>
                 </table>
+                <div id="season-lb-toggle-wrap" class="leaderboard-toggle-wrap" style="display:none;">
+                    <button id="season-lb-toggle-btn" type="button" class="leaderboard-toggle-btn" onclick="TMC.toggleSeasonDetailLeaderboard()"></button>
+                </div>
                 <div id="season-lb-empty" class="empty-state" style="display:none;">
                     <p>No ranked players yet.</p>
                 </div>
@@ -968,17 +976,42 @@ const TMC = {
         const lb = await this.api('leaderboard', { season_id: seasonId });
         const body = document.getElementById('season-lb-body');
         const empty = document.getElementById('season-lb-empty');
+        const toggleWrap = document.getElementById('season-lb-toggle-wrap');
+        const toggleBtn = document.getElementById('season-lb-toggle-btn');
         if (!body) return;
 
         if (!lb || lb.length === 0 || lb.error) {
             body.innerHTML = '';
             if (empty) empty.style.display = '';
+            if (toggleWrap) toggleWrap.style.display = 'none';
             return;
         }
         if (empty) empty.style.display = 'none';
 
         const includeActions = !!(this.state.currentScreen === 'season-detail' && this.state.player && this.state.player.participation && this.state.player.participation.can_freeze);
-        body.innerHTML = this.renderSeasonLeaderboardRows(lb, includeActions);
+        const capped = lb.slice(0, 20);
+        const rows = this._seasonDetailLeaderboardExpanded ? capped : capped.slice(0, 3);
+        body.innerHTML = this.renderSeasonLeaderboardRows(rows, includeActions, { firstCol: 'rate' });
+
+        if (toggleWrap && toggleBtn) {
+            if (lb.length > 3) {
+                toggleWrap.style.display = '';
+                toggleBtn.textContent = this._seasonDetailLeaderboardExpanded
+                    ? '▴ Hide to Top 3'
+                    : '▾ Show Top 20';
+            } else {
+                toggleWrap.style.display = 'none';
+            }
+        }
+    },
+
+    toggleSeasonDetailLeaderboard() {
+        this._seasonDetailLeaderboardExpanded = !this._seasonDetailLeaderboardExpanded;
+        if (this.state.currentSeason) this.loadSeasonLeaderboard(this.state.currentSeason);
+    },
+
+    openSeasonalLeaderboardTab() {
+        this.navigate('global-lb', { tab: 'seasonal' });
     },
 
     // ==================== ACTIONS ====================
@@ -1583,8 +1616,10 @@ const TMC = {
         theadRow.innerHTML = columns.map((c) => `<th>${c}</th>`).join('');
     },
 
-    renderSeasonLeaderboardRows(entries, includeActions = false) {
+    renderSeasonLeaderboardRows(entries, includeActions = false, options = {}) {
         const canFreeze = includeActions && !!(this.state.player && this.state.player.participation && this.state.player.participation.can_freeze);
+        const firstCol = options.firstCol === 'rate' ? 'rate' : 'rank';
+        const showRateNearCoins = !!options.showRateNearCoins;
         return entries.map((entry, i) => {
             const rank = entry.final_rank || (i + 1);
             const isLockedIn = entry.lock_in_effect_tick !== null;
@@ -1596,16 +1631,23 @@ const TMC = {
             } else if (entry.end_membership) {
                 statusBadge += ' <span class="badge badge-ended">End-Finisher</span>';
             }
+            const ratePerTick = Number(entry.rate_per_tick || 0);
+            const firstColValue = firstCol === 'rate'
+                ? `${this.formatPercentCompact(ratePerTick)} /t`
+                : `#${rank}`;
+            const coinsCell = showRateNearCoins
+                ? `${this.formatNumber(entry.coins || 0)}<div class="lb-econ-meta">Rate ${this.formatPercentCompact(ratePerTick)}/t • Boost ${entry.boost_pct != null ? entry.boost_pct : '0'}%</div>`
+                : this.formatNumber(entry.coins || 0);
 
             return `
                 <tr class="${isMe ? 'my-row' : ''} ${rank <= 3 ? 'top-three' : ''}">
-                    <td class="rank-cell">${rank <= 3 ? ['&#129351;', '&#129352;', '&#129353;'][rank-1] : rank}</td>
+                    <td class="${firstCol === 'rate' ? 'rate-cell' : 'rank-cell'}">${firstColValue}</td>
                     <td class="player-cell">
                         <span class="player-link" onclick="TMC.navigate('profile', ${entry.player_id})">${this.escapeHtml(entry.handle)}</span>
                     </td>
                     <td class="stars-cell">${this.formatNumber(entry.seasonal_stars)}</td>
                     <td class="boost-cell">${entry.boost_pct != null ? entry.boost_pct + '%' : '0%'}</td>
-                    <td class="stars-cell">${this.formatNumber(entry.coins || 0)}</td>
+                    <td class="stars-cell">${coinsCell}</td>
                     <td class="status-cell">${statusBadge}</td>
                     ${canFreeze ? `<td class="status-cell">${(!isMe && entry.activity_state === 'Active') ? `<button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); TMC.freezeByPlayerId(${entry.player_id})">Freeze</button>` : ''}</td>` : ''}
                 </tr>
@@ -1625,20 +1667,39 @@ const TMC = {
                 `Season #${activeSeason.season_id} Leaderboard`,
                 'Ranked by Seasonal Stars in your active season.'
             );
-            this.setLeaderboardHeader(['Rank', 'Player', 'Stars', 'Boost', 'Coins', 'Status']);
+            this.setLeaderboardHeader(['Rank', 'Player', 'Stars', 'Boost', 'Coins / Rate', 'Status']);
 
             const lb = await this.api('leaderboard', { season_id: activeSeason.season_id });
             if (!lb || lb.length === 0 || lb.error) {
                 body.innerHTML = '';
                 empty.style.display = '';
                 empty.innerHTML = '<p>No ranked players yet in this season.</p>';
+                const seasonalToggleWrap = document.getElementById('global-seasonal-lb-toggle-wrap');
+                if (seasonalToggleWrap) seasonalToggleWrap.style.display = 'none';
                 return;
             }
 
             empty.style.display = 'none';
-            body.innerHTML = this.renderSeasonLeaderboardRows(lb);
+            const visibleRows = this._globalSeasonalLeaderboardExpanded ? lb : lb.slice(0, 20);
+            body.innerHTML = this.renderSeasonLeaderboardRows(visibleRows, false, { firstCol: 'rank', showRateNearCoins: true });
+
+            const seasonalToggleWrap = document.getElementById('global-seasonal-lb-toggle-wrap');
+            const seasonalToggleBtn = document.getElementById('global-seasonal-lb-toggle-btn');
+            if (seasonalToggleWrap && seasonalToggleBtn) {
+                if (lb.length > 20) {
+                    seasonalToggleWrap.style.display = '';
+                    seasonalToggleBtn.textContent = this._globalSeasonalLeaderboardExpanded
+                        ? '▴ Show Top 20'
+                        : '▾ Show All';
+                } else {
+                    seasonalToggleWrap.style.display = 'none';
+                }
+            }
             return;
         }
+
+        const seasonalToggleWrap = document.getElementById('global-seasonal-lb-toggle-wrap');
+        if (seasonalToggleWrap) seasonalToggleWrap.style.display = 'none';
 
         this.setLeaderboardMeta(
             'Global Leaderboard',
@@ -1669,6 +1730,11 @@ const TMC = {
                 </tr>
             `;
         }).join('');
+    },
+
+    toggleGlobalSeasonalLeaderboard() {
+        this._globalSeasonalLeaderboardExpanded = !this._globalSeasonalLeaderboardExpanded;
+        this.loadGlobalLeaderboard();
     },
 
     // ==================== SHOP ====================
