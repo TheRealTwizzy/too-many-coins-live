@@ -477,11 +477,29 @@ try {
 } catch (Throwable $e) {
     http_response_code(500);
     echo json_encode(['error' => 'Internal server error']);
-    error_log($e->getMessage());
+    error_log('API error: ' . $e->__toString());
 }
 
 // ==================== HELPER FUNCTIONS ====================
 const LEADERBOARD_MAX_LIMIT = 200;
+
+function tableExists(Database $db, string $tableName): bool {
+    static $cache = [];
+
+    if (isset($cache[$tableName])) {
+        return $cache[$tableName];
+    }
+
+    $row = $db->fetch(
+        "SELECT COUNT(*) AS c
+         FROM information_schema.tables
+         WHERE table_schema = DATABASE() AND table_name = ?",
+        [$tableName]
+    );
+
+    $cache[$tableName] = ((int)($row['c'] ?? 0)) > 0;
+    return $cache[$tableName];
+}
 
 function getSigilDropRateMetadata($sigilPower = 0) {
     $sigilPower = max(0, (int)$sigilPower);
@@ -816,55 +834,116 @@ function getLeaderboard($seasonId, int $limit = 0) {
     $status = GameTime::getSeasonStatus($season);
     if ($status === 'Active' || $status === 'Blackout') {
         $gameTime = GameTime::now();
-        $rows = $db->fetchAll(
-            "SELECT p.player_id, p.handle,
-                    COALESCE(sp.seasonal_stars, 0) AS seasonal_stars,
-                    COALESCE(sp.coins, 0) AS coins,
-                    sp.participation_time_total,
-                    sp.final_rank,
-                    sp.lock_in_effect_tick,
-                    COALESCE(sp.end_membership, 0) AS end_membership,
-                    sp.badge_awarded,
-                    COALESCE(sp.global_stars_earned, 0) AS global_stars_earned,
-                    COALESCE(sp.participation_bonus, 0) AS participation_bonus,
-                    COALESCE(sp.placement_bonus, 0) AS placement_bonus,
-                    p.activity_state, p.online_current,
-                    COALESCE(frz.is_frozen, 0) AS is_frozen,
-                    ROUND(
-                        LEAST(
+        $hasBoostTables = tableExists($db, 'active_boosts');
+        $hasFreezeTable = tableExists($db, 'active_freezes');
+
+        if ($hasBoostTables && $hasFreezeTable) {
+            $rows = $db->fetchAll(
+                "SELECT p.player_id, p.handle,
+                        COALESCE(sp.seasonal_stars, 0) AS seasonal_stars,
+                        COALESCE(sp.coins, 0) AS coins,
+                        sp.participation_time_total,
+                        sp.final_rank,
+                        sp.lock_in_effect_tick,
+                        COALESCE(sp.end_membership, 0) AS end_membership,
+                        sp.badge_awarded,
+                        COALESCE(sp.global_stars_earned, 0) AS global_stars_earned,
+                        COALESCE(sp.participation_bonus, 0) AS participation_bonus,
+                        COALESCE(sp.placement_bonus, 0) AS placement_bonus,
+                        p.activity_state, p.online_current,
+                        COALESCE(frz.is_frozen, 0) AS is_frozen,
+                        ROUND(
+                            LEAST(
+                                COALESCE(self_b.self_fp, 0) + glob_b.global_fp,
+                                4000000
+                            ) / 10000, 1
+                        ) AS boost_pct
+                        , LEAST(
                             COALESCE(self_b.self_fp, 0) + glob_b.global_fp,
                             4000000
-                        ) / 10000, 1
-                    ) AS boost_pct
-                    , LEAST(
-                        COALESCE(self_b.self_fp, 0) + glob_b.global_fp,
-                        4000000
-                    ) AS boost_mod_fp
-             FROM players p
-             LEFT JOIN season_participation sp ON sp.player_id = p.player_id AND sp.season_id = ?
-             LEFT JOIN (
-                 SELECT player_id, SUM(modifier_fp) AS self_fp
-                 FROM active_boosts
-                 WHERE season_id = ? AND is_active = 1 AND scope = 'SELF' AND expires_tick >= ?
-                 GROUP BY player_id
-             ) self_b ON self_b.player_id = p.player_id
-             LEFT JOIN (
-                 SELECT target_player_id AS player_id, 1 AS is_frozen
-                 FROM active_freezes
-                 WHERE season_id = ? AND is_active = 1 AND expires_tick >= ?
-                 GROUP BY target_player_id
-             ) frz ON frz.player_id = p.player_id
-             CROSS JOIN (
-                 SELECT COALESCE(SUM(modifier_fp), 0) AS global_fp
-                 FROM active_boosts
-                 WHERE season_id = ? AND is_active = 1 AND scope = 'GLOBAL' AND expires_tick >= ?
-              ) glob_b
-              WHERE p.joined_season_id = ? AND p.participation_enabled = 1
-              ORDER BY COALESCE(sp.seasonal_stars, 0) DESC, p.player_id ASC{$limitClause}",
-            $limit > 0
-                ? [$seasonId, $seasonId, $gameTime, $seasonId, $gameTime, $seasonId, $gameTime, $seasonId, $limit]
-                : [$seasonId, $seasonId, $gameTime, $seasonId, $gameTime, $seasonId, $gameTime, $seasonId]
-        );
+                        ) AS boost_mod_fp
+                 FROM players p
+                 LEFT JOIN season_participation sp ON sp.player_id = p.player_id AND sp.season_id = ?
+                 LEFT JOIN (
+                     SELECT player_id, SUM(modifier_fp) AS self_fp
+                     FROM active_boosts
+                     WHERE season_id = ? AND is_active = 1 AND scope = 'SELF' AND expires_tick >= ?
+                     GROUP BY player_id
+                 ) self_b ON self_b.player_id = p.player_id
+                 LEFT JOIN (
+                     SELECT target_player_id AS player_id, 1 AS is_frozen
+                     FROM active_freezes
+                     WHERE season_id = ? AND is_active = 1 AND expires_tick >= ?
+                     GROUP BY target_player_id
+                 ) frz ON frz.player_id = p.player_id
+                 CROSS JOIN (
+                     SELECT COALESCE(SUM(modifier_fp), 0) AS global_fp
+                     FROM active_boosts
+                     WHERE season_id = ? AND is_active = 1 AND scope = 'GLOBAL' AND expires_tick >= ?
+                  ) glob_b
+                  WHERE p.joined_season_id = ? AND p.participation_enabled = 1
+                  ORDER BY COALESCE(sp.seasonal_stars, 0) DESC, p.player_id ASC{$limitClause}",
+                $limit > 0
+                    ? [$seasonId, $seasonId, $gameTime, $seasonId, $gameTime, $seasonId, $gameTime, $seasonId, $limit]
+                    : [$seasonId, $seasonId, $gameTime, $seasonId, $gameTime, $seasonId, $gameTime, $seasonId]
+            );
+        } elseif ($hasFreezeTable) {
+            $rows = $db->fetchAll(
+                "SELECT p.player_id, p.handle,
+                        COALESCE(sp.seasonal_stars, 0) AS seasonal_stars,
+                        COALESCE(sp.coins, 0) AS coins,
+                        sp.participation_time_total,
+                        sp.final_rank,
+                        sp.lock_in_effect_tick,
+                        COALESCE(sp.end_membership, 0) AS end_membership,
+                        sp.badge_awarded,
+                        COALESCE(sp.global_stars_earned, 0) AS global_stars_earned,
+                        COALESCE(sp.participation_bonus, 0) AS participation_bonus,
+                        COALESCE(sp.placement_bonus, 0) AS placement_bonus,
+                        p.activity_state, p.online_current,
+                        COALESCE(frz.is_frozen, 0) AS is_frozen,
+                        0.0 AS boost_pct,
+                        0 AS boost_mod_fp
+                 FROM players p
+                 LEFT JOIN season_participation sp ON sp.player_id = p.player_id AND sp.season_id = ?
+                 LEFT JOIN (
+                     SELECT target_player_id AS player_id, 1 AS is_frozen
+                     FROM active_freezes
+                     WHERE season_id = ? AND is_active = 1 AND expires_tick >= ?
+                     GROUP BY target_player_id
+                 ) frz ON frz.player_id = p.player_id
+                 WHERE p.joined_season_id = ? AND p.participation_enabled = 1
+                 ORDER BY COALESCE(sp.seasonal_stars, 0) DESC, p.player_id ASC{$limitClause}",
+                $limit > 0
+                    ? [$seasonId, $seasonId, $gameTime, $seasonId, $limit]
+                    : [$seasonId, $seasonId, $gameTime, $seasonId]
+            );
+        } else {
+            $rows = $db->fetchAll(
+                "SELECT p.player_id, p.handle,
+                        COALESCE(sp.seasonal_stars, 0) AS seasonal_stars,
+                        COALESCE(sp.coins, 0) AS coins,
+                        sp.participation_time_total,
+                        sp.final_rank,
+                        sp.lock_in_effect_tick,
+                        COALESCE(sp.end_membership, 0) AS end_membership,
+                        sp.badge_awarded,
+                        COALESCE(sp.global_stars_earned, 0) AS global_stars_earned,
+                        COALESCE(sp.participation_bonus, 0) AS participation_bonus,
+                        COALESCE(sp.placement_bonus, 0) AS placement_bonus,
+                        p.activity_state, p.online_current,
+                        0 AS is_frozen,
+                        0.0 AS boost_pct,
+                        0 AS boost_mod_fp
+                 FROM players p
+                 LEFT JOIN season_participation sp ON sp.player_id = p.player_id AND sp.season_id = ?
+                 WHERE p.joined_season_id = ? AND p.participation_enabled = 1
+                 ORDER BY COALESCE(sp.seasonal_stars, 0) DESC, p.player_id ASC{$limitClause}",
+                $limit > 0
+                    ? [$seasonId, $seasonId, $limit]
+                    : [$seasonId, $seasonId]
+            );
+        }
         foreach ($rows as &$row) {
             $playerShim = [
                 'participation_enabled' => 1,
