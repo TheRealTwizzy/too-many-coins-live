@@ -56,6 +56,14 @@ function makeTMC() {
                 const executeConfirmedAction = async () => {
                     try {
                         const confirmedResult = await executeFn(true);
+                        if (confirmedResult && (confirmedResult.reason_code === 'balance_changed' || confirmedResult.error === 'balance_changed')) {
+                            const refreshedPreview = confirmedResult.preview && !confirmedResult.preview.error ? confirmedResult.preview : null;
+                            if (refreshedPreview) {
+                                this.toast(confirmedResult.message || 'Balance changed. Please review and confirm again.', 'info');
+                                openConfirmFlow(refreshedPreview, resolve);
+                                return;
+                            }
+                        }
                         resolve(confirmedResult);
                     } catch (error) {
                         this.toast(`Failed to complete ${title || 'this action'}. Please try again.`, 'error');
@@ -113,6 +121,19 @@ function makeTMC() {
                         this.toast(previewUnavailableMessage, 'error');
                         resolve(null);
                     });
+                });
+            }
+
+            if (directResult && (directResult.reason_code === 'balance_changed' || directResult.error === 'balance_changed')) {
+                return new Promise((resolve) => {
+                    const serverPreview = directResult.preview && !directResult.preview.error ? directResult.preview : null;
+                    if (!serverPreview) {
+                        this.toast(directResult.message || 'Balance changed. Please try again.', 'error');
+                        resolve(directResult);
+                        return;
+                    }
+                    this.toast(directResult.message || 'Balance changed. Please review and confirm again.', 'info');
+                    openConfirmFlow(serverPreview, resolve);
                 });
             }
 
@@ -282,6 +303,49 @@ async function testUserCancel() {
     console.log('  ✓ cancel: user closes modal → clean null result');
 }
 
+/**
+ * 6. Confirmed execution returns balance_changed with preview
+ *    → client re-opens confirmation flow and succeeds on second confirm
+ */
+async function testBalanceChangedRetryFlow() {
+    const { tmc, toasts } = makeTMC();
+
+    const previewFn = async () => ({ requires_explicit_confirm: true, coins_available: 1000 });
+    let confirmedCalls = 0;
+    const executeFn = async (confirmed) => {
+        if (!confirmed) return { error: 'confirmation_required', preview: { requires_explicit_confirm: true } };
+        confirmedCalls += 1;
+        if (confirmedCalls === 1) {
+            return {
+                error: 'balance_changed',
+                reason_code: 'balance_changed',
+                message: 'Your balance changed since confirmation.',
+                preview: { requires_explicit_confirm: true, coins_available: 900 },
+            };
+        }
+        return { success: true };
+    };
+
+    const resultPromise = tmc.runWithEconGate(previewFn, executeFn, 'Balance changed flow');
+    await flushPromises();
+
+    // First confirmation attempt.
+    assert.ok(typeof tmc._econPendingAction === 'function', 'balance_changed: first confirmation should be pending');
+    await tmc.executeEconConfirmed();
+    await flushPromises();
+
+    // Flow should reopen confirmation with refreshed preview.
+    assert.ok(typeof tmc._econPendingAction === 'function', 'balance_changed: confirmation should reopen after drift');
+    await tmc.executeEconConfirmed();
+
+    const result = await resultPromise;
+    assert.ok(result && result.success, 'balance_changed: second confirmation should succeed');
+    assert.ok(toasts.some(t => t.level === 'info' && /balance/i.test(t.msg)),
+        'balance_changed: should show informational balance-change toast');
+
+    console.log('  ✓ balance_changed: re-review + re-confirm flow succeeds');
+}
+
 // ---------------------------------------------------------------------------
 // Run all tests — await all Promises to guarantee completion before exit.
 // ---------------------------------------------------------------------------
@@ -291,6 +355,7 @@ Promise.all([
     testFallbackNoPreview(),
     testConcurrentConfirmations(),
     testUserCancel(),
+    testBalanceChangedRetryFlow(),
 ]).then(() => {
     console.log('\nAll econ confirm flow tests passed.');
 }).catch((e) => {

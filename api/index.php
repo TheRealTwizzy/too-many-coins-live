@@ -789,7 +789,7 @@ function getSeasonDetail($player, $seasonId) {
             "SELECT sp.player_id, p.handle, sp.seasonal_stars, sp.lock_in_effect_tick
              FROM season_participation sp
              JOIN players p ON p.player_id = sp.player_id
-             WHERE sp.season_id = ? AND (sp.seasonal_stars > 0 OR sp.end_membership = 1 OR sp.lock_in_effect_tick IS NOT NULL)
+             WHERE sp.season_id = ?
              ORDER BY sp.seasonal_stars DESC, sp.player_id ASC
              LIMIT 50",
             [$seasonId]
@@ -898,7 +898,6 @@ function getLeaderboard($seasonId, int $limit = 0) {
          FROM season_participation sp
          JOIN players p ON p.player_id = sp.player_id
          WHERE sp.season_id = ?
-         AND (sp.seasonal_stars > 0 OR sp.end_membership = 1 OR sp.lock_in_effect_tick IS NOT NULL OR sp.final_rank IS NOT NULL)
          ORDER BY sp.seasonal_stars DESC, sp.player_id ASC{$limitClause}",
         $limit > 0 ? [$seasonId, $limit] : [$seasonId]
     );
@@ -924,8 +923,7 @@ function getGlobalLeaderboard() {
         "SELECT player_id, handle, global_stars, activity_state, online_current
          FROM players 
          WHERE global_stars > 0 AND profile_deleted_at IS NULL
-         ORDER BY global_stars DESC, player_id ASC
-         LIMIT 100"
+         ORDER BY global_stars DESC, player_id ASC"
     );
 }
 
@@ -1550,6 +1548,28 @@ function gatedTradeInitiate(
     }
 
     $result = Actions::tradeInitiate($player['player_id'], $acceptorId, $sideACoins, $sideASigils, $sideBCoins, $sideBSigils);
+    if (!empty($result['error']) && !empty($confirmed)) {
+        $insufficientErrors = [
+            'Insufficient coins',
+            'Insufficient coins to cover trade fee',
+            'Insufficient Tier 1 Sigils',
+            'Insufficient Tier 2 Sigils',
+            'Insufficient Tier 3 Sigils',
+            'Insufficient Tier 4 Sigils',
+            'Insufficient Tier 5 Sigils',
+            'Insufficient Tier 6 Sigils',
+        ];
+        if (in_array((string)$result['error'], $insufficientErrors, true)) {
+            $latestPreview = previewTrade($player, $acceptorId, $sideACoins, $sideASigils, $sideBCoins, $sideBSigils);
+            return [
+                'error' => 'balance_changed',
+                'reason_code' => 'balance_changed',
+                'message' => 'Your balance or inventory changed since confirmation. Please review and confirm again.',
+                'preview' => $latestPreview,
+                'prior_error' => $result['error'],
+            ];
+        }
+    }
     if (!empty($result['success'])) {
         $result['receipt'] = [
             'executed_total_cost'      => (int)($sideACoins) + (int)($result['fee'] ?? 0),

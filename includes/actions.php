@@ -443,33 +443,41 @@ class Actions {
             return ['error' => 'Coins-for-Coins trades are not allowed'];
         }
         
-        // Check affordability for initiator
-        $participation = $db->fetch(
-            "SELECT * FROM season_participation WHERE player_id = ? AND season_id = ?",
-            [$playerId, $seasonId]
-        );
-        
-        if ($participation['coins'] < $aCoins) return ['error' => 'Insufficient coins'];
-        for ($t = 0; $t < SIGIL_MAX_TIER; $t++) {
-            $sigilCol = 'sigils_t' . ($t + 1);
-            if (($sideASigils[$t] ?? 0) > $participation[$sigilCol]) {
-                return ['error' => 'Insufficient Tier ' . ($t + 1) . ' Sigils'];
-            }
-        }
-        
         // Calculate trade value and fee
         $declaredValue = Economy::calculateTradeValue($season, $aCoins, $sideASigils, $bCoins, $sideBSigils);
         $fee = Economy::calculateTradeFee($season, $declaredValue);
-        
-        // Check initiator can afford fee
-        if ($participation['coins'] < $aCoins + $fee) {
-            return ['error' => 'Insufficient coins to cover trade fee'];
-        }
         
         $gameTime = GameTime::now();
         
         $db->beginTransaction();
         try {
+            // Lock initiator participation row so affordability checks and escrow are atomic.
+            $participation = $db->fetch(
+                "SELECT * FROM season_participation WHERE player_id = ? AND season_id = ? FOR UPDATE",
+                [$playerId, $seasonId]
+            );
+            if (!$participation) {
+                $db->rollback();
+                return ['error' => 'Not participating in any season'];
+            }
+
+            if ($participation['coins'] < $aCoins) {
+                $db->rollback();
+                return ['error' => 'Insufficient coins'];
+            }
+            for ($t = 0; $t < SIGIL_MAX_TIER; $t++) {
+                $sigilCol = 'sigils_t' . ($t + 1);
+                if (($sideASigils[$t] ?? 0) > $participation[$sigilCol]) {
+                    $db->rollback();
+                    return ['error' => 'Insufficient Tier ' . ($t + 1) . ' Sigils'];
+                }
+            }
+
+            if ($participation['coins'] < $aCoins + $fee) {
+                $db->rollback();
+                return ['error' => 'Insufficient coins to cover trade fee'];
+            }
+
             // Escrow initiator assets + fee
             $db->query(
                 "UPDATE season_participation SET coins = coins - ? WHERE player_id = ? AND season_id = ?",
@@ -517,43 +525,63 @@ class Actions {
      */
     public static function tradeAccept($playerId, $tradeId) {
         $db = Database::getInstance();
-        $trade = $db->fetch("SELECT * FROM trades WHERE trade_id = ? AND status = 'OPEN'", [$tradeId]);
-        if (!$trade) return ['error' => 'Trade not found or not open'];
-        if ($trade['acceptor_id'] != $playerId) return ['error' => 'This trade is not for you'];
-        
         $player = $db->fetch("SELECT * FROM players WHERE player_id = ?", [$playerId]);
         if ($player['idle_modal_active']) {
             return ['error' => 'Cannot trade while idle', 'reason_code' => 'idle_gated'];
         }
-        
-        $seasonId = $trade['season_id'];
-        $fee = (int)$trade['locked_fee_coins'];
-        $sideBCoins = (int)$trade['side_b_coins'];
-        $sideBSigils = json_decode($trade['side_b_sigils'], true);
-        $sideACoins = (int)$trade['side_a_coins'];
-        $sideASigils = json_decode($trade['side_a_sigils'], true);
-        
-        // Check acceptor affordability
-        $participation = $db->fetch(
-            "SELECT * FROM season_participation WHERE player_id = ? AND season_id = ?",
-            [$playerId, $seasonId]
-        );
-        
-        if ($participation['coins'] < $sideBCoins + $fee) {
-            return ['error' => 'Insufficient coins to accept trade (including fee)'];
-        }
-        for ($t = 0; $t < SIGIL_MAX_TIER; $t++) {
-            $col = 'sigils_t' . ($t + 1);
-            if (($sideBSigils[$t] ?? 0) > $participation[$col]) {
-                return ['error' => 'Insufficient Tier ' . ($t + 1) . ' Sigils'];
-            }
-        }
-        
+
         $gameTime = GameTime::now();
-        $initiatorId = $trade['initiator_id'];
-        
+
         $db->beginTransaction();
         try {
+            $trade = $db->fetch("SELECT * FROM trades WHERE trade_id = ? AND status = 'OPEN' FOR UPDATE", [$tradeId]);
+            if (!$trade) {
+                $db->rollback();
+                return ['error' => 'Trade not found or not open'];
+            }
+            if ($trade['acceptor_id'] != $playerId) {
+                $db->rollback();
+                return ['error' => 'This trade is not for you'];
+            }
+
+            $seasonId = $trade['season_id'];
+            $fee = (int)$trade['locked_fee_coins'];
+            $sideBCoins = (int)$trade['side_b_coins'];
+            $sideBSigils = json_decode($trade['side_b_sigils'], true);
+            $sideACoins = (int)$trade['side_a_coins'];
+            $sideASigils = json_decode($trade['side_a_sigils'], true);
+            $initiatorId = $trade['initiator_id'];
+
+            $participation = $db->fetch(
+                "SELECT * FROM season_participation WHERE player_id = ? AND season_id = ? FOR UPDATE",
+                [$playerId, $seasonId]
+            );
+            if (!$participation) {
+                $db->rollback();
+                return ['error' => 'Not participating in any season'];
+            }
+            // Lock initiator row before transfers.
+            $initiatorParticipation = $db->fetch(
+                "SELECT * FROM season_participation WHERE player_id = ? AND season_id = ? FOR UPDATE",
+                [$initiatorId, $seasonId]
+            );
+            if (!$initiatorParticipation) {
+                $db->rollback();
+                return ['error' => 'Trade initiator is no longer participating'];
+            }
+
+            if ($participation['coins'] < $sideBCoins + $fee) {
+                $db->rollback();
+                return ['error' => 'Insufficient coins to accept trade (including fee)'];
+            }
+            for ($t = 0; $t < SIGIL_MAX_TIER; $t++) {
+                $col = 'sigils_t' . ($t + 1);
+                if (($sideBSigils[$t] ?? 0) > $participation[$col]) {
+                    $db->rollback();
+                    return ['error' => 'Insufficient Tier ' . ($t + 1) . ' Sigils'];
+                }
+            }
+
             // Deduct acceptor's assets + fee
             $db->query(
                 "UPDATE season_participation SET coins = coins - ? WHERE player_id = ? AND season_id = ?",

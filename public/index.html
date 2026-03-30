@@ -195,8 +195,18 @@
                         <tbody id="global-lb-body">
                         </tbody>
                     </table>
+                    <div id="global-lb-pagination-wrap" class="leaderboard-pagination-wrap" style="display:none;">
+                        <button id="global-lb-page-prev" type="button" class="leaderboard-toggle-btn" onclick="TMC.previousGlobalLeaderboardPage()">Previous</button>
+                        <span id="global-lb-pagination-label" class="leaderboard-pagination-label">Page 1 / 1</span>
+                        <button id="global-lb-page-next" type="button" class="leaderboard-toggle-btn" onclick="TMC.nextGlobalLeaderboardPage()">Next</button>
+                    </div>
                     <div id="global-seasonal-lb-toggle-wrap" class="leaderboard-toggle-wrap" style="display:none;">
                         <button id="global-seasonal-lb-toggle-btn" type="button" class="leaderboard-toggle-btn" onclick="TMC.toggleGlobalSeasonalLeaderboard()"></button>
+                    </div>
+                    <div id="global-seasonal-lb-pagination-wrap" class="leaderboard-pagination-wrap" style="display:none;">
+                        <button id="global-seasonal-lb-page-prev" type="button" class="leaderboard-toggle-btn" onclick="TMC.previousGlobalSeasonalLeaderboardPage()">Previous</button>
+                        <span id="global-seasonal-lb-pagination-label" class="leaderboard-pagination-label">Page 1 / 1</span>
+                        <button id="global-seasonal-lb-page-next" type="button" class="leaderboard-toggle-btn" onclick="TMC.nextGlobalSeasonalLeaderboardPage()">Next</button>
                     </div>
                     <div id="global-lb-empty" class="empty-state" style="display:none;">
                         <p>No players on the leaderboard yet. Earn Global Stars through season outcomes and Lock-In!</p>

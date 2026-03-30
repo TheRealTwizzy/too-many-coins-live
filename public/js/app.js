@@ -30,6 +30,8 @@ const TMC = {
     API_BASE: '/api/index.php',
     _seasonDetailLeaderboardExpanded: false,
     _globalSeasonalLeaderboardExpanded: false,
+    _globalSeasonalLeaderboardPage: 1,
+    _globalLeaderboardPage: 1,
 
     // ==================== API ====================
     async api(action, data = {}) {
@@ -991,7 +993,7 @@ const TMC = {
         const includeActions = !!(this.state.currentScreen === 'season-detail' && this.state.player && this.state.player.participation && this.state.player.participation.can_freeze);
         const capped = lb.slice(0, 20);
         const rows = this._seasonDetailLeaderboardExpanded ? capped : capped.slice(0, 3);
-        body.innerHTML = this.renderSeasonLeaderboardRows(rows, includeActions, { firstCol: 'rate' });
+        body.innerHTML = this.renderSeasonLeaderboardRows(rows, includeActions, { firstCol: 'rate', showRateColumn: false });
 
         if (toggleWrap && toggleBtn) {
             if (lb.length > 3) {
@@ -1619,7 +1621,7 @@ const TMC = {
     renderSeasonLeaderboardRows(entries, includeActions = false, options = {}) {
         const canFreeze = includeActions && !!(this.state.player && this.state.player.participation && this.state.player.participation.can_freeze);
         const firstCol = options.firstCol === 'rate' ? 'rate' : 'rank';
-        const showRateNearCoins = !!options.showRateNearCoins;
+        const showRateColumn = options.showRateColumn !== false;
         return entries.map((entry, i) => {
             // Support rank field under any of the common schema aliases
             // (final_rank for ended seasons, position/rank for live data).
@@ -1639,9 +1641,8 @@ const TMC = {
             const firstColValue = firstCol === 'rate'
                 ? `${this.formatPercentCompact(ratePerTick)} /t`
                 : `#${rank}`;
-            const coinsCell = showRateNearCoins
-                ? `${this.formatNumber(entry.coins || 0)}<div class="lb-econ-meta">Rate ${this.formatPercentCompact(ratePerTick)}/t • Boost ${entry.boost_pct != null ? entry.boost_pct : '0'}%</div>`
-                : this.formatNumber(entry.coins || 0);
+            const coinsCell = this.formatNumber(entry.coins || 0);
+            const rateCell = `${this.formatPercentCompact(ratePerTick)} /t`;
 
             return `
                 <tr class="${isMe ? 'my-row' : ''} ${rank <= 3 ? 'top-three' : ''}">
@@ -1652,6 +1653,7 @@ const TMC = {
                     <td class="stars-cell">${this.formatNumber(entry.seasonal_stars)}</td>
                     <td class="boost-cell">${entry.boost_pct != null ? entry.boost_pct + '%' : '0%'}</td>
                     <td class="stars-cell">${coinsCell}</td>
+                    ${showRateColumn ? `<td class="rate-cell">${rateCell}</td>` : ''}
                     <td class="status-cell">${statusBadge}</td>
                     ${canFreeze ? `<td class="status-cell">${(!isMe && entry.activity_state === 'Active') ? `<button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); TMC.freezeByPlayerId(${entry.player_id})">Freeze</button>` : ''}</td>` : ''}
                 </tr>
@@ -1663,15 +1665,17 @@ const TMC = {
         const activeSeason = this.getActiveJoinedSeason();
         const body = document.getElementById('global-lb-body');
         const empty = document.getElementById('global-lb-empty');
+        const globalPagerWrap = document.getElementById('global-lb-pagination-wrap');
         const showSeasonalTab = !!activeSeason;
         this.updateLeaderboardTabUI(showSeasonalTab);
 
         if (this.state.leaderboardTab === 'seasonal' && activeSeason) {
+            if (globalPagerWrap) globalPagerWrap.style.display = 'none';
             this.setLeaderboardMeta(
                 `Season #${activeSeason.season_id} Leaderboard`,
                 'Ranked by Seasonal Stars in your active season.'
             );
-            this.setLeaderboardHeader(['Rank', 'Player', 'Stars', 'Boost', 'Coins / Rate', 'Status']);
+            this.setLeaderboardHeader(['Rank', 'Player', 'Stars', 'Boost', 'Coins', 'Rate', 'Status']);
 
             const lb = await this.api('leaderboard', { season_id: activeSeason.season_id, limit: this._globalSeasonalLeaderboardExpanded ? 0 : 20 });
             if (!Array.isArray(lb) || lb.length === 0 || lb.error) {
@@ -1680,12 +1684,28 @@ const TMC = {
                 empty.innerHTML = '<p>No ranked players yet in this season.</p>';
                 const seasonalToggleWrap = document.getElementById('global-seasonal-lb-toggle-wrap');
                 if (seasonalToggleWrap) seasonalToggleWrap.style.display = 'none';
+                const seasonalPagerWrap = document.getElementById('global-seasonal-lb-pagination-wrap');
+                if (seasonalPagerWrap) seasonalPagerWrap.style.display = 'none';
                 return;
             }
 
             empty.style.display = 'none';
-            const visibleRows = this._globalSeasonalLeaderboardExpanded ? lb : lb.slice(0, 20);
-            body.innerHTML = this.renderSeasonLeaderboardRows(visibleRows, false, { firstCol: 'rank', showRateNearCoins: true });
+            let visibleRows = lb.slice(0, 20);
+            if (this._globalSeasonalLeaderboardExpanded) {
+                if (lb.length > 100) {
+                    const totalPages = Math.max(1, Math.ceil(lb.length / 100));
+                    const currentPage = Math.min(Math.max(1, this._globalSeasonalLeaderboardPage), totalPages);
+                    this._globalSeasonalLeaderboardPage = currentPage;
+                    const start = (currentPage - 1) * 100;
+                    visibleRows = lb.slice(start, start + 100);
+                } else {
+                    this._globalSeasonalLeaderboardPage = 1;
+                    visibleRows = lb;
+                }
+            } else {
+                this._globalSeasonalLeaderboardPage = 1;
+            }
+            body.innerHTML = this.renderSeasonLeaderboardRows(visibleRows, false, { firstCol: 'rank', showRateColumn: true });
 
             const seasonalToggleWrap = document.getElementById('global-seasonal-lb-toggle-wrap');
             const seasonalToggleBtn = document.getElementById('global-seasonal-lb-toggle-btn');
@@ -1699,11 +1719,29 @@ const TMC = {
                     seasonalToggleWrap.style.display = 'none';
                 }
             }
+
+            const seasonalPagerWrap = document.getElementById('global-seasonal-lb-pagination-wrap');
+            const seasonalPagerLabel = document.getElementById('global-seasonal-lb-pagination-label');
+            const seasonalPagerPrev = document.getElementById('global-seasonal-lb-page-prev');
+            const seasonalPagerNext = document.getElementById('global-seasonal-lb-page-next');
+            if (seasonalPagerWrap && seasonalPagerLabel && seasonalPagerPrev && seasonalPagerNext) {
+                if (this._globalSeasonalLeaderboardExpanded && lb.length > 100) {
+                    const totalPages = Math.max(1, Math.ceil(lb.length / 100));
+                    seasonalPagerWrap.style.display = '';
+                    seasonalPagerLabel.textContent = `Page ${this._globalSeasonalLeaderboardPage} / ${totalPages}`;
+                    seasonalPagerPrev.disabled = this._globalSeasonalLeaderboardPage <= 1;
+                    seasonalPagerNext.disabled = this._globalSeasonalLeaderboardPage >= totalPages;
+                } else {
+                    seasonalPagerWrap.style.display = 'none';
+                }
+            }
             return;
         }
 
         const seasonalToggleWrap = document.getElementById('global-seasonal-lb-toggle-wrap');
         if (seasonalToggleWrap) seasonalToggleWrap.style.display = 'none';
+        const seasonalPagerWrap = document.getElementById('global-seasonal-lb-pagination-wrap');
+        if (seasonalPagerWrap) seasonalPagerWrap.style.display = 'none';
 
         this.setLeaderboardMeta(
             'Global Leaderboard',
@@ -1716,12 +1754,19 @@ const TMC = {
             body.innerHTML = '';
             empty.style.display = '';
             empty.innerHTML = '<p>No players on the leaderboard yet. Earn Global Stars through season outcomes and Lock-In!</p>';
+            if (globalPagerWrap) globalPagerWrap.style.display = 'none';
             return;
         }
         empty.style.display = 'none';
 
-        body.innerHTML = lb.map((entry, i) => {
-            const rank = i + 1;
+        const totalPages = Math.max(1, Math.ceil(lb.length / 100));
+        const currentPage = Math.min(Math.max(1, this._globalLeaderboardPage), totalPages);
+        this._globalLeaderboardPage = currentPage;
+        const start = (currentPage - 1) * 100;
+        const visibleRows = lb.length > 100 ? lb.slice(start, start + 100) : lb;
+
+        body.innerHTML = visibleRows.map((entry, i) => {
+            const rank = start + i + 1;
             const isMe = this.state.player && entry.player_id == this.state.player.player_id;
             return `
                 <tr class="${isMe ? 'my-row' : ''} ${rank <= 3 ? 'top-three' : ''}">
@@ -1734,10 +1779,47 @@ const TMC = {
                 </tr>
             `;
         }).join('');
+
+        const globalPagerLabel = document.getElementById('global-lb-pagination-label');
+        const globalPagerPrev = document.getElementById('global-lb-page-prev');
+        const globalPagerNext = document.getElementById('global-lb-page-next');
+        if (globalPagerWrap && globalPagerLabel && globalPagerPrev && globalPagerNext) {
+            if (lb.length > 100) {
+                globalPagerWrap.style.display = '';
+                globalPagerLabel.textContent = `Page ${currentPage} / ${totalPages}`;
+                globalPagerPrev.disabled = currentPage <= 1;
+                globalPagerNext.disabled = currentPage >= totalPages;
+            } else {
+                globalPagerWrap.style.display = 'none';
+            }
+        }
+    },
+
+    previousGlobalLeaderboardPage() {
+        this._globalLeaderboardPage = Math.max(1, this._globalLeaderboardPage - 1);
+        this.loadGlobalLeaderboard();
+    },
+
+    nextGlobalLeaderboardPage() {
+        this._globalLeaderboardPage += 1;
+        this.loadGlobalLeaderboard();
     },
 
     toggleGlobalSeasonalLeaderboard() {
         this._globalSeasonalLeaderboardExpanded = !this._globalSeasonalLeaderboardExpanded;
+        if (!this._globalSeasonalLeaderboardExpanded) {
+            this._globalSeasonalLeaderboardPage = 1;
+        }
+        this.loadGlobalLeaderboard();
+    },
+
+    previousGlobalSeasonalLeaderboardPage() {
+        this._globalSeasonalLeaderboardPage = Math.max(1, this._globalSeasonalLeaderboardPage - 1);
+        this.loadGlobalLeaderboard();
+    },
+
+    nextGlobalSeasonalLeaderboardPage() {
+        this._globalSeasonalLeaderboardPage += 1;
         this.loadGlobalLeaderboard();
     },
 
@@ -2792,6 +2874,14 @@ const TMC = {
             const executeConfirmedAction = async () => {
                 try {
                     const confirmedResult = await executeFn(true);
+                    if (confirmedResult && (confirmedResult.reason_code === 'balance_changed' || confirmedResult.error === 'balance_changed')) {
+                        const refreshedPreview = confirmedResult.preview && !confirmedResult.preview.error ? confirmedResult.preview : null;
+                        if (refreshedPreview) {
+                            this.toast(confirmedResult.message || 'Balance changed. Please review and confirm again.', 'info');
+                            openConfirmFlow(refreshedPreview, resolve);
+                            return;
+                        }
+                    }
                     resolve(confirmedResult);
                 } catch (error) {
                     const actionLabel = title || 'this action';
@@ -2863,6 +2953,19 @@ const TMC = {
                     this.toast(previewUnavailableMessage, 'error');
                     resolve(null);
                 });
+            });
+        }
+
+        if (directResult && (directResult.reason_code === 'balance_changed' || directResult.error === 'balance_changed')) {
+            return new Promise((resolve) => {
+                const serverPreview = directResult.preview && !directResult.preview.error ? directResult.preview : null;
+                if (!serverPreview) {
+                    this.toast(directResult.message || 'Balance changed. Please try again.', 'error');
+                    resolve(directResult);
+                    return;
+                }
+                this.toast(directResult.message || 'Balance changed. Please review and confirm again.', 'info');
+                openConfirmFlow(serverPreview, resolve);
             });
         }
 

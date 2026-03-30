@@ -1037,6 +1037,27 @@ a:hover { text-decoration: underline; }
     color: var(--text-primary);
 }
 
+.leaderboard-toggle-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.leaderboard-pagination-wrap {
+    margin-top: 0.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+}
+
+.leaderboard-pagination-label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    font-weight: 700;
+    min-width: 5.5rem;
+    text-align: center;
+}
+
 .player-link {
     cursor: pointer;
     color: var(--accent-blue-light);

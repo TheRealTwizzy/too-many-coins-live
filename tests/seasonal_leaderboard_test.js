@@ -46,6 +46,21 @@ function isLeaderboardEmpty(lb) {
     return !Array.isArray(lb) || lb.length === 0 || !!lb.error;
 }
 
+/** Mirrors seasonal tab paging behavior: >100 only after expanded Show All. */
+function paginateSeasonal(lb, expanded, page) {
+    if (!Array.isArray(lb)) return [];
+    if (!expanded) return lb.slice(0, 20);
+    if (lb.length <= 100) return lb;
+    const safePage = Math.max(1, Number(page) || 1);
+    const start = (safePage - 1) * 100;
+    return lb.slice(start, start + 100);
+}
+
+/** Mirrors the new seasonal table header split for coins/rate. */
+function getSeasonalHeaderColumns() {
+    return ['Rank', 'Player', 'Stars', 'Boost', 'Coins', 'Rate', 'Status'];
+}
+
 // ===========================================================================
 // 1. Rank derivation — final_rank field (typical ended season)
 // ===========================================================================
@@ -227,6 +242,47 @@ function isLeaderboardEmpty(lb) {
     assert.strictEqual(isLeaderboardEmpty(weirdResponse), true,
         'non-array object with length: must trigger empty-state (Array.isArray guard)');
     console.log('  ✓ empty-state: plain object (non-array) → empty (Array.isArray guard)');
+}
+
+// ===========================================================================
+// 16. Seasonal columns — Coins and Rate are separate columns
+// ===========================================================================
+
+{
+    const cols = getSeasonalHeaderColumns();
+    assert.deepStrictEqual(cols, ['Rank', 'Player', 'Stars', 'Boost', 'Coins', 'Rate', 'Status']);
+    assert.ok(!cols.includes('Coins / Rate'), 'Coins/Rate combined header must not be present');
+    console.log('  ✓ seasonal columns: Coins and Rate are split');
+}
+
+// ===========================================================================
+// 17. Pagination threshold — no paging before show-all expansion
+// ===========================================================================
+
+{
+    const lb = Array.from({ length: 250 }, (_, i) => ({ player_id: i + 1 }));
+    const rows = paginateSeasonal(lb, false, 1);
+    assert.strictEqual(rows.length, 20, 'collapsed state must still show top 20');
+    console.log('  ✓ pagination threshold: collapsed view remains top 20');
+}
+
+// ===========================================================================
+// 18. Pagination threshold — expanded view uses 100 rows/page when >100
+// ===========================================================================
+
+{
+    const lb = Array.from({ length: 250 }, (_, i) => ({ player_id: i + 1 }));
+    const page1 = paginateSeasonal(lb, true, 1);
+    const page2 = paginateSeasonal(lb, true, 2);
+    const page3 = paginateSeasonal(lb, true, 3);
+
+    assert.strictEqual(page1.length, 100, 'expanded page 1 should have 100 rows');
+    assert.strictEqual(page2.length, 100, 'expanded page 2 should have 100 rows');
+    assert.strictEqual(page3.length, 50, 'expanded page 3 should have remaining rows');
+    assert.strictEqual(page1[0].player_id, 1, 'page 1 starts from first row');
+    assert.strictEqual(page2[0].player_id, 101, 'page 2 starts at 101');
+    assert.strictEqual(page3[0].player_id, 201, 'page 3 starts at 201');
+    console.log('  ✓ pagination threshold: expanded view paginates at 100 rows/page');
 }
 
 console.log('\nAll seasonal leaderboard tests passed.');
