@@ -1627,7 +1627,6 @@ const TMC = {
             const parsedFinalRank = Number(rawRank);
             const hasFinalRank = rawRank != null && !Number.isNaN(parsedFinalRank) && parsedFinalRank > 0;
             const rank = hasFinalRank ? parsedFinalRank : (i + 1);
-            const isLockedIn = entry.lock_in_effect_tick !== null;
             const isMe = this.state.player && entry.player_id == this.state.player.player_id;
             let statusBadge = this.renderPlayerStatusBadge(entry);
             if (entry.badge_awarded) {

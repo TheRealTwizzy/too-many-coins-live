@@ -899,9 +899,8 @@ function getLeaderboard($seasonId, int $limit = 0) {
          JOIN players p ON p.player_id = sp.player_id
          WHERE sp.season_id = ?
          AND (sp.seasonal_stars > 0 OR sp.end_membership = 1 OR sp.lock_in_effect_tick IS NOT NULL OR sp.final_rank IS NOT NULL)
-         ORDER BY sp.seasonal_stars DESC, sp.player_id ASC
-         LIMIT ?",
-        [$seasonId, ($limit > 0 ? $limit : 100)]
+         ORDER BY sp.seasonal_stars DESC, sp.player_id ASC{$limitClause}",
+        $limit > 0 ? [$seasonId, $limit] : [$seasonId]
     );
     foreach ($rows as &$row) {
         $row['rate_per_tick'] = 0;
