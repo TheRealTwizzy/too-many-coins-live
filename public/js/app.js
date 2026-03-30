@@ -1621,7 +1621,9 @@ const TMC = {
         const firstCol = options.firstCol === 'rate' ? 'rate' : 'rank';
         const showRateNearCoins = !!options.showRateNearCoins;
         return entries.map((entry, i) => {
-            const rank = entry.final_rank || (i + 1);
+            const parsedFinalRank = Number(entry.final_rank);
+            const hasFinalRank = entry.final_rank != null && !Number.isNaN(parsedFinalRank) && parsedFinalRank > 0;
+            const rank = hasFinalRank ? parsedFinalRank : (i + 1);
             const isLockedIn = entry.lock_in_effect_tick !== null;
             const isMe = this.state.player && entry.player_id == this.state.player.player_id;
             let statusBadge = this.renderPlayerStatusBadge(entry);
