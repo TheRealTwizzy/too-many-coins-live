@@ -1621,7 +1621,9 @@ const TMC = {
         const firstCol = options.firstCol === 'rate' ? 'rate' : 'rank';
         const showRateNearCoins = !!options.showRateNearCoins;
         return entries.map((entry, i) => {
-            const rank = entry.final_rank || (i + 1);
+            const parsedFinalRank = Number(entry.final_rank);
+            const hasFinalRank = entry.final_rank != null && !Number.isNaN(parsedFinalRank) && parsedFinalRank > 0;
+            const rank = hasFinalRank ? parsedFinalRank : (i + 1);
             const isLockedIn = entry.lock_in_effect_tick !== null;
             const isMe = this.state.player && entry.player_id == this.state.player.player_id;
             let statusBadge = this.renderPlayerStatusBadge(entry);
@@ -2730,10 +2732,10 @@ const TMC = {
         if (modal) modal.style.display = 'flex';
     },
 
-    closeEconConfirm() {
+    closeEconConfirm(skipCancelResolve = false) {
         const modal = document.getElementById('econ-confirm-modal');
         if (modal) modal.style.display = 'none';
-        if (typeof this._econCancelResolver === 'function') {
+        if (!skipCancelResolve && typeof this._econCancelResolver === 'function') {
             const resolver = this._econCancelResolver;
             this._econCancelResolver = null;
             resolver(null);
@@ -2743,7 +2745,7 @@ const TMC = {
 
     async executeEconConfirmed() {
         const cb = this._econPendingAction;
-        this.closeEconConfirm();
+        this.closeEconConfirm(true);
         if (cb) await cb();
     },
 
@@ -2784,6 +2786,37 @@ const TMC = {
      * The executeFn must accept confirm_economic_impact as a boolean argument.
      */
     async runWithEconGate(previewFn, executeFn, title) {
+        const openConfirmFlow = async (previewPayload, resolve) => {
+            const executeConfirmedAction = async () => {
+                try {
+                    const confirmedResult = await executeFn(true);
+                    resolve(confirmedResult);
+                } catch (error) {
+                    const actionLabel = title || 'this action';
+                    console.error(`Error executing confirmed economic action (${actionLabel}):`, error);
+                    this.toast(`Failed to complete ${actionLabel}. Please try again.`, 'error');
+                    resolve(null);
+                }
+            };
+
+            const modal = document.getElementById('econ-confirm-modal');
+            if (!modal) {
+                const ok = window.confirm('This action has economic impact and requires confirmation. Proceed?');
+                if (!ok) {
+                    resolve(null);
+                    return;
+                }
+                await executeConfirmedAction();
+                return;
+            }
+
+            this._econCancelResolver = resolve;
+            this.showEconConfirm(previewPayload, title, async () => {
+                this._econCancelResolver = null;
+                await executeConfirmedAction();
+            });
+        };
+
         const preview = await previewFn();
         if (!preview || preview.error) {
             this.toast(preview ? preview.error : 'Preview failed', 'error');
@@ -2792,23 +2825,30 @@ const TMC = {
 
         if (preview.requires_explicit_confirm) {
             return new Promise((resolve) => {
-                this._econCancelResolver = resolve;
-                this.showEconConfirm(preview, title, async () => {
-                    this._econCancelResolver = null;
-                    const result = await executeFn(true);
-                    resolve(result);
-                });
+                openConfirmFlow(preview, resolve);
             });
         }
 
         const directResult = await executeFn(false);
-        if (directResult && directResult.error === 'confirmation_required' && directResult.preview) {
+        if (directResult && directResult.error === 'confirmation_required') {
             return new Promise((resolve) => {
-                this._econCancelResolver = resolve;
-                this.showEconConfirm(directResult.preview, title, async () => {
-                    this._econCancelResolver = null;
-                    const confirmedResult = await executeFn(true);
-                    resolve(confirmedResult);
+                const previewUnavailableMessage = 'Confirmation required but preview is unavailable. Please try again.';
+                const serverPreview = directResult.preview && !directResult.preview.error ? directResult.preview : null;
+                if (serverPreview) {
+                    openConfirmFlow(serverPreview, resolve);
+                    return;
+                }
+
+                previewFn().then((retriedPreview) => {
+                    if (retriedPreview && !retriedPreview.error) {
+                        openConfirmFlow(retriedPreview, resolve);
+                        return;
+                    }
+                    this.toast(previewUnavailableMessage, 'error');
+                    resolve(directResult);
+                }).catch(() => {
+                    this.toast(previewUnavailableMessage, 'error');
+                    resolve(directResult);
                 });
             });
         }
