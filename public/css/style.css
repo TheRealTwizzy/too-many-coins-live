@@ -929,6 +929,25 @@ a:hover { text-decoration: underline; }
     margin-bottom: 0.75rem;
 }
 
+.season-lb-title-link {
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    font: inherit;
+    font-weight: 700;
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-color: rgba(255,255,255,0.35);
+    text-underline-offset: 2px;
+}
+
+.season-lb-title-link:hover {
+    color: var(--accent-gold-light);
+    text-decoration-color: var(--accent-gold-light);
+}
+
 .leaderboard-table {
     width: 100%;
     border-collapse: collapse;
@@ -975,9 +994,47 @@ a:hover { text-decoration: underline; }
     width: 36px;
 }
 
+.rate-cell {
+    font-family: var(--font-mono);
+    font-weight: 700;
+    width: 72px;
+}
+
 .stars-cell {
     font-family: var(--font-mono);
     font-weight: 600;
+}
+
+.lb-econ-meta {
+    font-family: var(--font-main);
+    font-weight: 500;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    margin-top: 0.2rem;
+    line-height: 1.2;
+}
+
+.leaderboard-toggle-wrap {
+    margin-top: 0.65rem;
+    display: flex;
+    justify-content: center;
+}
+
+.leaderboard-toggle-btn {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    border-radius: 999px;
+    padding: 0.25rem 0.8rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.leaderboard-toggle-btn:hover {
+    border-color: var(--border-light);
+    color: var(--text-primary);
 }
 
 .player-link {
@@ -1433,6 +1490,129 @@ a:hover { text-decoration: underline; }
     color: var(--text-secondary);
     margin-bottom: 1.25rem;
     font-size: 0.85rem;
+}
+
+/* ==================== ECONOMIC CONFIRM MODAL ==================== */
+.econ-confirm-box {
+    border-color: var(--accent-orange);
+    max-width: 440px;
+    text-align: left;
+}
+
+.econ-confirm-box h2 {
+    text-align: center;
+}
+
+.econ-risk-icon {
+    text-align: center;
+    display: block;
+}
+
+.econ-impact-details {
+    background: rgba(0,0,0,0.25);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 0.85rem 1rem;
+    margin-bottom: 1rem;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+}
+
+.econ-impact-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.2rem 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+.econ-impact-row:last-child {
+    border-bottom: none;
+}
+
+.econ-impact-label {
+    color: var(--text-tertiary);
+}
+
+.econ-impact-value {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.econ-impact-value.warn {
+    color: var(--accent-orange);
+}
+
+.econ-impact-value.danger {
+    color: var(--accent-red, #f56565);
+}
+
+.econ-risk-badge {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.75rem;
+}
+
+.econ-risk-badge.low    { background: rgba(72,187,120,0.15); color: #68d391; border: 1px solid rgba(72,187,120,0.3); }
+.econ-risk-badge.medium { background: rgba(237,137,54,0.15);  color: #f6ad55; border: 1px solid rgba(237,137,54,0.3); }
+.econ-risk-badge.high   { background: rgba(245,101,101,0.15); color: #fc8181; border: 1px solid rgba(245,101,101,0.3); }
+
+.econ-risk-explain {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.75rem;
+    line-height: 1.45;
+}
+
+.econ-confirm-check {
+    margin-bottom: 1rem;
+}
+
+.econ-check-label {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    line-height: 1.4;
+}
+
+.econ-check-label input[type="checkbox"] {
+    flex-shrink: 0;
+    margin-top: 0.15rem;
+    accent-color: var(--accent-primary);
+}
+
+.econ-confirm-actions {
+    display: flex;
+    gap: 0.6rem;
+    justify-content: flex-end;
+}
+
+/* Receipt modal */
+.econ-receipt-box {
+    border-color: var(--accent-green, #68d391);
+    max-width: 420px;
+    text-align: left;
+}
+
+.econ-receipt-box h2 {
+    text-align: center;
+}
+
+.econ-receipt-details {
+    background: rgba(0,0,0,0.25);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 0.85rem 1rem;
+    margin-bottom: 1rem;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
 }
 
 /* ==================== TOAST ==================== */

@@ -211,12 +211,12 @@ If you are not eligible, the drop pity counter is reset.`
 |---|---|
 | Base drop rate | 1 in 8 eligible ticks (~12.5%) at zero sigil power |
 | Pity threshold | 120,000 real seconds worth of ticks (2,000 ticks at 60s) |
-| Rolling cap | 8 drops per 24h window |
+| Rolling cap | 6 drops per 24h window |
 
 **Dynamic adjustments (per player, per tick):**
-- **Boost activity (negative pressure):** Every 20% of active boost modifier raises the denominator by 1 (up to +3 steps), reducing overall drop frequency while boosts are running. The denominator is clamped between 5 and 20 so drops remain viable in all states.
-- **Inventory uplift (empty/low):** When a tier's inventory is below 3, that tier's conditional odds are increased by 1.5% per missing sigil (up to +4.5% per tier). Ensures players who spend sigils on boosts retain a practical path to replenishment.
-- **Inventory dampening (high):** For every 5 sigils of a tier held, that tier's conditional odds are reduced by 1% (up to −10% per tier). Prevents a single tier from over-dropping once a player has accumulated many.
+- **Boost activity (negative pressure):** Every 3% of active boost modifier raises the denominator by 1 (up to +3 steps), reducing overall drop frequency while boosts are running. The denominator is clamped between 5 and 20 so drops remain viable in all states.
+- **Inventory uplift (empty/low):** When a tier's inventory is below 3, that tier's conditional odds are increased by 1.0% per missing sigil (up to +3.0% per tier). Ensures players who spend sigils on boosts retain a practical path to replenishment.
+- **Inventory dampening (high):** For every 8 sigils of a tier held, that tier's conditional odds are reduced by 0.75% (up to −6% per tier). Prevents a single tier from over-dropping once a player has accumulated many.
 
 **Tier odds (conditional, at zero sigil power):**
 - Tier I: ~70.0%
@@ -291,10 +291,11 @@ Default timeout is **1 real hour**. Open trades expire automatically at timeout.
 | Threshold | Rate |
 |---|---|
 | 0+ | 5% |
-| 10,000+ | 3% |
-| 100,000+ | 2% |
+| 100,000+ | 8% |
+| 1,000,000+ | 12% |
+| 10,000,000+ | 18% |
 
-Minimum fee is **10 coins**.
+Minimum fee is **25 coins**.
 
 On accepted trades, fees from both parties are burned from season coin supply.`
           }
@@ -450,6 +451,38 @@ Deleted profiles return as removed placeholders.`
 - Season-state checks
 - Input validation
 - Rate limiting at API level`
+          },
+          {
+            id: "consequence-transparency",
+            title: "High-Impact Action Previews and Receipts",
+            content: `For economy actions with significant impact, the game surfaces a **preview** before execution:
+
+**How it works:**
+
+1. When you click Buy Stars, Send Trade, or Activate Boost, the client requests a preview from the server.
+2. The server computes:
+   - Estimated total cost
+   - Fee included (if applicable)
+   - Supply impact in basis points and percent
+   - Post-action balance estimate
+   - Risk severity: **low**, **medium**, or **high**
+
+3. **Low-risk** actions proceed immediately (one-click UX preserved).
+4. **Medium or high-risk** actions open a confirmation modal showing full impact details. You must check an acknowledgement checkbox before proceeding.
+
+**Confirmation requirement:**
+
+The server enforces gating: if \`confirm_economic_impact=1\` is not sent with a medium/high-risk action, the API returns error \`confirmation_required\` along with a full preview payload.
+
+**Post-action receipts:**
+
+After any gated action completes successfully, a receipt modal shows:
+- Actual cost / sigils consumed
+- Fee burned
+- Post-action balance
+- Other relevant execution details
+
+This system ensures you always know the economic consequence of high-impact decisions before committing.`
           },
           {
             id: "deterministic-surfaces",

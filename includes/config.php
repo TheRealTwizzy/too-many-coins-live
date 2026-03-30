@@ -81,9 +81,9 @@ define('SIGIL_PACING_ENABLED', true);
 //   1,000,000), up to a maximum of SIGIL_INVENTORY_ADJ_MAX_STEPS reductions.  This
 //   prevents a single tier from over-dropping once a player has accumulated many of them
 //   while still keeping drops the primary sigil acquisition source.
-define('SIGIL_INVENTORY_ADJ_THRESHOLD', 5);    // Trigger every N same-tier sigils owned
-define('SIGIL_INVENTORY_ADJ_STEP_FP',   10000); // Reduce odds by 1% (10,000 / 1,000,000) per trigger
-define('SIGIL_INVENTORY_ADJ_MAX_STEPS', 10);   // Cap: maximum 10 triggers (≤10% total reduction per tier)
+define('SIGIL_INVENTORY_ADJ_THRESHOLD', 8);    // Trigger every N same-tier sigils owned
+define('SIGIL_INVENTORY_ADJ_STEP_FP',   7500);  // Reduce odds by 0.75% (7,500 / 1,000,000) per trigger
+define('SIGIL_INVENTORY_ADJ_MAX_STEPS', 8);    // Cap: maximum 8 triggers (≤6% total reduction per tier)
 
 // Boost-based drop frequency adjustment (negative pressure):
 //   High boost activity signals an active sigil economy; the Bernoulli denominator is
@@ -92,8 +92,9 @@ define('SIGIL_INVENTORY_ADJ_MAX_STEPS', 10);   // Cap: maximum 10 triggers (≤1
 //   denominator by 1, capped at SIGIL_BOOST_DROP_RATE_MAX_PENALTY steps.
 //   SIGIL_BOOST_DROP_RATE_FLOOR / CEILING clamp the final denominator so drops remain
 //   viable in all states and never become excessively rare.
-//   Example: base denominator 8, 40% boost → 8 + 2 = 10 (~10.0% vs ~12.5% base rate).
-define('SIGIL_BOOST_DROP_RATE_STEP_FP',    200000); // 20% boost per denominator-penalty step
+//   Example: base denominator 8, 40% boost → min(floor(40/3), 3) = +3 → 11
+//   (~9.09% vs ~12.5% base rate).
+define('SIGIL_BOOST_DROP_RATE_STEP_FP',     30000); // 3% boost per denominator-penalty step
 define('SIGIL_BOOST_DROP_RATE_MAX_PENALTY',      3); // Maximum denominator increase from boost activity
 define('SIGIL_BOOST_DROP_RATE_FLOOR',            5); // Absolute minimum denominator (most generous rate)
 define('SIGIL_BOOST_DROP_RATE_CEILING',         20); // Absolute maximum denominator (most restrictive rate)
@@ -108,7 +109,7 @@ define('SIGIL_PACING_JITTER_MAX_FP',       1500000); // 150% of base interval
 //   quickly find their inventories replenished.  Anti-inversion is re-enforced after the
 //   uplift so T1 >= T2 >= T3 >= T4 >= T5 is never violated.
 define('SIGIL_INVENTORY_UPLIFT_THRESHOLD',  3);     // Uplift applies when tier count < this value
-define('SIGIL_INVENTORY_UPLIFT_STEP_FP',   15000);  // Add 1.5% (15,000 / 1,000,000) per uplift step
+define('SIGIL_INVENTORY_UPLIFT_STEP_FP',   10000);  // Add 1.0% (10,000 / 1,000,000) per uplift step
 define('SIGIL_INVENTORY_UPLIFT_MAX_STEPS',      3); // Cap: at most 3 uplift steps per tier
 
 // Per-tier conditional-odds bounds (parts per 1,000,000).

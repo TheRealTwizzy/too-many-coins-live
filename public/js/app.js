@@ -28,6 +28,8 @@ const TMC = {
     },
 
     API_BASE: '/api/index.php',
+    _seasonDetailLeaderboardExpanded: false,
+    _globalSeasonalLeaderboardExpanded: false,
 
     // ==================== API ====================
     async api(action, data = {}) {
@@ -255,6 +257,9 @@ const TMC = {
                 this.loadSeasonDetail(data);
                 break;
             case 'global-lb':
+                if (data && data.tab === 'seasonal') {
+                    this.state.leaderboardTab = 'seasonal';
+                }
                 this.loadGlobalLeaderboard();
                 break;
             case 'shop':
@@ -821,7 +826,7 @@ const TMC = {
                         <p class="panel-info">Current price: <strong>${this.formatNumber(detail.current_star_price)} coins</strong> per star</p>
                         <div class="action-row">
                             <input type="number" id="purchase-stars" min="1" placeholder="Star quantity" class="input-field" oninput="TMC.updatePurchaseEstimate()">
-                            <button id="purchase-stars-btn" class="btn btn-primary" onclick="TMC.purchaseStars()" ${isBlackout ? 'disabled' : ''}>Buy Stars</button>
+                            <button id="purchase-stars-btn" class="btn btn-primary" onclick="TMC.purchaseStarsGated()" ${isBlackout ? 'disabled' : ''}>Buy Stars</button>
                             <button id="purchase-max-btn" class="btn btn-outline" onclick="TMC.buyMaxStars()" ${isBlackout ? 'disabled' : ''}>Buy Max</button>
                         </div>
                         <p id="purchase-estimate" class="panel-info">Enter a star quantity to see estimated coin cost.</p>
@@ -928,11 +933,11 @@ const TMC = {
         // Leaderboard
         html += `
             <div class="season-leaderboard">
-                <h3>Season Leaderboard</h3>
+                <h3><button class="season-lb-title-link" type="button" onclick="TMC.openSeasonalLeaderboardTab()">Season Leaderboard</button></h3>
                 <table class="leaderboard-table">
                     <thead>
                         <tr>
-                            <th>Rank</th>
+                            <th>Rate</th>
                             <th>Player</th>
                             <th>Stars</th>
                             <th>Boost</th>
@@ -944,6 +949,9 @@ const TMC = {
                     <tbody id="season-lb-body">
                     </tbody>
                 </table>
+                <div id="season-lb-toggle-wrap" class="leaderboard-toggle-wrap" style="display:none;">
+                    <button id="season-lb-toggle-btn" type="button" class="leaderboard-toggle-btn" onclick="TMC.toggleSeasonDetailLeaderboard()"></button>
+                </div>
                 <div id="season-lb-empty" class="empty-state" style="display:none;">
                     <p>No ranked players yet.</p>
                 </div>
@@ -965,20 +973,45 @@ const TMC = {
     },
 
     async loadSeasonLeaderboard(seasonId) {
-        const lb = await this.api('leaderboard', { season_id: seasonId });
+        const lb = await this.api('leaderboard', { season_id: seasonId, limit: 20 });
         const body = document.getElementById('season-lb-body');
         const empty = document.getElementById('season-lb-empty');
+        const toggleWrap = document.getElementById('season-lb-toggle-wrap');
+        const toggleBtn = document.getElementById('season-lb-toggle-btn');
         if (!body) return;
 
         if (!lb || lb.length === 0 || lb.error) {
             body.innerHTML = '';
             if (empty) empty.style.display = '';
+            if (toggleWrap) toggleWrap.style.display = 'none';
             return;
         }
         if (empty) empty.style.display = 'none';
 
         const includeActions = !!(this.state.currentScreen === 'season-detail' && this.state.player && this.state.player.participation && this.state.player.participation.can_freeze);
-        body.innerHTML = this.renderSeasonLeaderboardRows(lb, includeActions);
+        const capped = lb.slice(0, 20);
+        const rows = this._seasonDetailLeaderboardExpanded ? capped : capped.slice(0, 3);
+        body.innerHTML = this.renderSeasonLeaderboardRows(rows, includeActions, { firstCol: 'rate' });
+
+        if (toggleWrap && toggleBtn) {
+            if (lb.length > 3) {
+                toggleWrap.style.display = '';
+                toggleBtn.textContent = this._seasonDetailLeaderboardExpanded
+                    ? '▴ Hide to Top 3'
+                    : '▾ Show Top 20';
+            } else {
+                toggleWrap.style.display = 'none';
+            }
+        }
+    },
+
+    toggleSeasonDetailLeaderboard() {
+        this._seasonDetailLeaderboardExpanded = !this._seasonDetailLeaderboardExpanded;
+        if (this.state.currentSeason) this.loadSeasonLeaderboard(this.state.currentSeason);
+    },
+
+    openSeasonalLeaderboardTab() {
+        this.navigate('global-lb', { tab: 'seasonal' });
     },
 
     // ==================== ACTIONS ====================
@@ -1046,7 +1079,7 @@ const TMC = {
 
         input.value = maxStars;
         this.updatePurchaseEstimate();
-        await this.purchaseStars();
+        await this.purchaseStarsGated();
     },
 
     updatePurchaseEstimate() {
@@ -1303,12 +1336,12 @@ const TMC = {
                     ${description ? `<p class="boost-desc">${this.escapeHtml(description)}</p>` : ''}
                     <div class="action-row">
                         <button class="btn btn-sm ${hasSigil ? 'btn-primary' : 'btn-outline'}"
-                            onclick="TMC.purchaseBoostPower(${b.boost_id})"
+                            onclick="TMC.purchaseBoostPowerGated(${b.boost_id})"
                             ${!hasSigil ? 'disabled title="Not enough Sigils"' : ''}>
                             Power +${modPercent}%
                         </button>
                         <button class="btn btn-sm ${hasSigil ? 'btn-outline' : 'btn-outline'}"
-                            onclick="TMC.purchaseBoostTime(${b.boost_id})"
+                            onclick="TMC.purchaseBoostTimeGated(${b.boost_id})"
                             ${(!hasSigil || !canBuyTime) ? 'disabled title="Activate boost power first"' : ''}>
                             Time ${timePurchaseLabel}
                         </button>
@@ -1583,8 +1616,10 @@ const TMC = {
         theadRow.innerHTML = columns.map((c) => `<th>${c}</th>`).join('');
     },
 
-    renderSeasonLeaderboardRows(entries, includeActions = false) {
+    renderSeasonLeaderboardRows(entries, includeActions = false, options = {}) {
         const canFreeze = includeActions && !!(this.state.player && this.state.player.participation && this.state.player.participation.can_freeze);
+        const firstCol = options.firstCol === 'rate' ? 'rate' : 'rank';
+        const showRateNearCoins = !!options.showRateNearCoins;
         return entries.map((entry, i) => {
             const rank = entry.final_rank || (i + 1);
             const isLockedIn = entry.lock_in_effect_tick !== null;
@@ -1596,16 +1631,23 @@ const TMC = {
             } else if (entry.end_membership) {
                 statusBadge += ' <span class="badge badge-ended">End-Finisher</span>';
             }
+            const ratePerTick = Number(entry.rate_per_tick || 0);
+            const firstColValue = firstCol === 'rate'
+                ? `${this.formatPercentCompact(ratePerTick)} /t`
+                : `#${rank}`;
+            const coinsCell = showRateNearCoins
+                ? `${this.formatNumber(entry.coins || 0)}<div class="lb-econ-meta">Rate ${this.formatPercentCompact(ratePerTick)}/t • Boost ${entry.boost_pct != null ? entry.boost_pct : '0'}%</div>`
+                : this.formatNumber(entry.coins || 0);
 
             return `
                 <tr class="${isMe ? 'my-row' : ''} ${rank <= 3 ? 'top-three' : ''}">
-                    <td class="rank-cell">${rank <= 3 ? ['&#129351;', '&#129352;', '&#129353;'][rank-1] : rank}</td>
+                    <td class="${firstCol === 'rate' ? 'rate-cell' : 'rank-cell'}">${firstColValue}</td>
                     <td class="player-cell">
                         <span class="player-link" onclick="TMC.navigate('profile', ${entry.player_id})">${this.escapeHtml(entry.handle)}</span>
                     </td>
                     <td class="stars-cell">${this.formatNumber(entry.seasonal_stars)}</td>
                     <td class="boost-cell">${entry.boost_pct != null ? entry.boost_pct + '%' : '0%'}</td>
-                    <td class="stars-cell">${this.formatNumber(entry.coins || 0)}</td>
+                    <td class="stars-cell">${coinsCell}</td>
                     <td class="status-cell">${statusBadge}</td>
                     ${canFreeze ? `<td class="status-cell">${(!isMe && entry.activity_state === 'Active') ? `<button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); TMC.freezeByPlayerId(${entry.player_id})">Freeze</button>` : ''}</td>` : ''}
                 </tr>
@@ -1625,20 +1667,39 @@ const TMC = {
                 `Season #${activeSeason.season_id} Leaderboard`,
                 'Ranked by Seasonal Stars in your active season.'
             );
-            this.setLeaderboardHeader(['Rank', 'Player', 'Stars', 'Boost', 'Coins', 'Status']);
+            this.setLeaderboardHeader(['Rank', 'Player', 'Stars', 'Boost', 'Coins / Rate', 'Status']);
 
-            const lb = await this.api('leaderboard', { season_id: activeSeason.season_id });
+            const lb = await this.api('leaderboard', { season_id: activeSeason.season_id, limit: this._globalSeasonalLeaderboardExpanded ? 0 : 20 });
             if (!lb || lb.length === 0 || lb.error) {
                 body.innerHTML = '';
                 empty.style.display = '';
                 empty.innerHTML = '<p>No ranked players yet in this season.</p>';
+                const seasonalToggleWrap = document.getElementById('global-seasonal-lb-toggle-wrap');
+                if (seasonalToggleWrap) seasonalToggleWrap.style.display = 'none';
                 return;
             }
 
             empty.style.display = 'none';
-            body.innerHTML = this.renderSeasonLeaderboardRows(lb);
+            const visibleRows = this._globalSeasonalLeaderboardExpanded ? lb : lb.slice(0, 20);
+            body.innerHTML = this.renderSeasonLeaderboardRows(visibleRows, false, { firstCol: 'rank', showRateNearCoins: true });
+
+            const seasonalToggleWrap = document.getElementById('global-seasonal-lb-toggle-wrap');
+            const seasonalToggleBtn = document.getElementById('global-seasonal-lb-toggle-btn');
+            if (seasonalToggleWrap && seasonalToggleBtn) {
+                if (lb.length > 20) {
+                    seasonalToggleWrap.style.display = '';
+                    seasonalToggleBtn.textContent = this._globalSeasonalLeaderboardExpanded
+                        ? '▴ Show Top 20'
+                        : '▾ Show All';
+                } else {
+                    seasonalToggleWrap.style.display = 'none';
+                }
+            }
             return;
         }
+
+        const seasonalToggleWrap = document.getElementById('global-seasonal-lb-toggle-wrap');
+        if (seasonalToggleWrap) seasonalToggleWrap.style.display = 'none';
 
         this.setLeaderboardMeta(
             'Global Leaderboard',
@@ -1669,6 +1730,11 @@ const TMC = {
                 </tr>
             `;
         }).join('');
+    },
+
+    toggleGlobalSeasonalLeaderboard() {
+        this._globalSeasonalLeaderboardExpanded = !this._globalSeasonalLeaderboardExpanded;
+        this.loadGlobalLeaderboard();
     },
 
     // ==================== SHOP ====================
@@ -1815,7 +1881,7 @@ const TMC = {
                         ${otherPlayers.map(p => `<option value="${p.player_id}">${this.escapeHtml(p.handle)} ${p.online_current ? '(online)' : ''}</option>`).join('')}
                     </select>
                 </div>
-                <button class="btn btn-primary btn-lg" onclick="TMC.submitTrade()">Send Trade Offer</button>
+                <button class="btn btn-primary btn-lg" onclick="TMC.submitTradeGated()">Send Trade Offer</button>
             </div>
 
             <div class="my-trades-section">
@@ -2588,7 +2654,317 @@ const TMC = {
         };
         const category = (options && options.category) ? options.category : (categoryMap[type] || 'info_general');
         this.pushSuccessNotification(message, { ...options, category });
-    }
+    },
+
+    // ==================== ECONOMIC CONSEQUENCE PREVIEW / CONFIRM / RECEIPT ====================
+
+    // Pending confirmation callback — set before opening the modal.
+    _econPendingAction: null,
+
+    /**
+     * Render a preview payload into the impact-detail panel.
+     */
+    _renderEconImpact(preview, title) {
+        const risk = preview.risk || { severity: 'low', flags: [], explain: '' };
+        const sev = risk.severity || 'low';
+        const sevEmoji = sev === 'high' ? '🔴' : sev === 'medium' ? '🟡' : '🟢';
+
+        const titleEl = document.getElementById('econ-confirm-title');
+        if (titleEl) titleEl.textContent = title || 'Confirm Action';
+
+        const iconEl = document.getElementById('econ-risk-icon');
+        if (iconEl) iconEl.textContent = sev === 'high' ? '⚠️' : sev === 'medium' ? '⚡' : 'ℹ️';
+
+        const detailsEl = document.getElementById('econ-impact-details');
+        if (!detailsEl) return;
+
+        const fmt = (n) => this.formatNumber(n);
+        const balType = preview.balance_type || 'coins';
+        const isSigil = balType.startsWith('sigils_t');
+        const balLabel = isSigil ? `Tier ${balType.replace('sigils_t','')} Sigils` : 'Coins';
+
+        let rows = '';
+        if (!isSigil) {
+            rows += `<div class="econ-impact-row"><span class="econ-impact-label">Total cost</span><span class="econ-impact-value">${fmt(preview.estimated_total_cost)} coins</span></div>`;
+            if (preview.estimated_fee > 0) {
+                rows += `<div class="econ-impact-row"><span class="econ-impact-label">Fee included</span><span class="econ-impact-value">${fmt(preview.estimated_fee)} coins</span></div>`;
+            }
+            if (preview.estimated_price_impact_pct != null) {
+                const impactClass = preview.estimated_price_impact_pct > 0.5 ? 'warn' : '';
+                rows += `<div class="econ-impact-row"><span class="econ-impact-label">Supply impact</span><span class="econ-impact-value ${impactClass}">${preview.estimated_price_impact_pct.toFixed(2)}% (${fmt(preview.estimated_price_impact_bp)} bp)</span></div>`;
+            }
+            rows += `<div class="econ-impact-row"><span class="econ-impact-label">Balance after</span><span class="econ-impact-value ${sev === 'high' ? 'danger' : sev === 'medium' ? 'warn' : ''}">${fmt(preview.post_balance_estimate)} ${balLabel}</span></div>`;
+        } else {
+            rows += `<div class="econ-impact-row"><span class="econ-impact-label">Sigil cost</span><span class="econ-impact-value">${fmt(preview.estimated_total_cost)} ${balLabel}</span></div>`;
+            rows += `<div class="econ-impact-row"><span class="econ-impact-label">Remaining after</span><span class="econ-impact-value ${sev === 'high' ? 'danger' : sev === 'medium' ? 'warn' : ''}">${fmt(preview.post_balance_estimate)} ${balLabel}</span></div>`;
+        }
+
+        detailsEl.innerHTML = `
+            <div style="margin-bottom:0.6rem;">
+                <span class="econ-risk-badge ${sev}">${sevEmoji} ${sev.toUpperCase()} RISK</span>
+            </div>
+            ${risk.explain ? `<div class="econ-risk-explain">${this.escapeHtml(risk.explain)}</div>` : ''}
+            ${rows}
+        `;
+    },
+
+    /**
+     * Show the economic confirmation modal for a medium/high-risk action.
+     * @param {object} preview  Preview payload from the server.
+     * @param {string} title    Modal heading.
+     * @param {Function} onConfirm  Async callback to execute when confirmed.
+     */
+    showEconConfirm(preview, title, onConfirm) {
+        this._renderEconImpact(preview, title);
+        this._econPendingAction = onConfirm;
+
+        const checkbox = document.getElementById('econ-confirm-checkbox');
+        const confirmBtn = document.getElementById('econ-confirm-btn');
+        if (checkbox) {
+            checkbox.checked = false;
+            checkbox.onchange = () => { if (confirmBtn) confirmBtn.disabled = !checkbox.checked; };
+        }
+        if (confirmBtn) confirmBtn.disabled = true;
+
+        const modal = document.getElementById('econ-confirm-modal');
+        if (modal) modal.style.display = 'flex';
+    },
+
+    closeEconConfirm() {
+        const modal = document.getElementById('econ-confirm-modal');
+        if (modal) modal.style.display = 'none';
+        if (typeof this._econCancelResolver === 'function') {
+            const resolver = this._econCancelResolver;
+            this._econCancelResolver = null;
+            resolver(null);
+        }
+        this._econPendingAction = null;
+    },
+
+    async executeEconConfirmed() {
+        const cb = this._econPendingAction;
+        this.closeEconConfirm();
+        if (cb) await cb();
+    },
+
+    /**
+     * Show a post-action receipt modal.
+     */
+    showEconReceipt(receipt, label) {
+        const detailsEl = document.getElementById('econ-receipt-details');
+        if (!detailsEl) return;
+
+        const fmt = (n) => this.formatNumber(n);
+        let rows = '';
+        if (receipt.stars_purchased != null) {
+            rows += `<div class="econ-impact-row"><span class="econ-impact-label">Stars purchased</span><span class="econ-impact-value">${fmt(receipt.stars_purchased)}</span></div>`;
+        }
+        if (receipt.executed_total_cost != null) {
+            rows += `<div class="econ-impact-row"><span class="econ-impact-label">Total spent</span><span class="econ-impact-value">${fmt(receipt.executed_total_cost)}</span></div>`;
+        }
+        if (receipt.executed_fee > 0) {
+            rows += `<div class="econ-impact-row"><span class="econ-impact-label">Fee burned</span><span class="econ-impact-value">${fmt(receipt.executed_fee)}</span></div>`;
+        }
+        if (receipt.declared_value != null) {
+            rows += `<div class="econ-impact-row"><span class="econ-impact-label">Trade value</span><span class="econ-impact-value">${fmt(receipt.declared_value)}</span></div>`;
+        }
+        if (receipt.sigils_consumed != null) {
+            rows += `<div class="econ-impact-row"><span class="econ-impact-label">Sigils consumed</span><span class="econ-impact-value">${fmt(receipt.sigils_consumed)} T${receipt.tier_consumed || '?'}</span></div>`;
+        }
+        rows += `<div class="econ-impact-row"><span class="econ-impact-label">Balance after</span><span class="econ-impact-value">${fmt(receipt.post_balance_estimate)}</span></div>`;
+
+        detailsEl.innerHTML = `<div class="econ-impact-details">${rows}</div>`;
+
+        const modal = document.getElementById('econ-receipt-modal');
+        if (modal) modal.style.display = 'flex';
+    },
+
+    /**
+     * High-level: preview → if high/medium impact show confirm modal, else execute directly.
+     * The executeFn must accept confirm_economic_impact as a boolean argument.
+     */
+    async runWithEconGate(previewFn, executeFn, title) {
+        const preview = await previewFn();
+        if (!preview || preview.error) {
+            this.toast(preview ? preview.error : 'Preview failed', 'error');
+            return null;
+        }
+
+        if (preview.requires_explicit_confirm) {
+            return new Promise((resolve) => {
+                this._econCancelResolver = resolve;
+                this.showEconConfirm(preview, title, async () => {
+                    this._econCancelResolver = null;
+                    const result = await executeFn(true);
+                    resolve(result);
+                });
+            });
+        }
+
+        const directResult = await executeFn(false);
+        if (directResult && directResult.error === 'confirmation_required' && directResult.preview) {
+            return new Promise((resolve) => {
+                this._econCancelResolver = resolve;
+                this.showEconConfirm(directResult.preview, title, async () => {
+                    this._econCancelResolver = null;
+                    const confirmedResult = await executeFn(true);
+                    resolve(confirmedResult);
+                });
+            });
+        }
+
+        return directResult;
+    },
+
+    /**
+     * Wrap purchaseStars to use the preview/confirm/receipt flow.
+     */
+    async purchaseStarsGated() {
+        const input = document.getElementById('purchase-stars');
+        const starsRequested = parseInt(input ? input.value : '0');
+        if (!starsRequested || starsRequested <= 0) {
+            this.toast('Enter a valid star quantity.', 'error');
+            return;
+        }
+
+        const result = await this.runWithEconGate(
+            () => this.api('star_purchase_preview', { stars_requested: starsRequested }),
+            (confirm) => this.api('purchase_stars', { stars_requested: starsRequested, confirm_economic_impact: confirm ? 1 : 0 }),
+            'Confirm Star Purchase'
+        );
+
+        if (!result) return;
+        if (result.error && result.error !== 'confirmation_required') {
+            this.toast(result.error, 'error');
+            return;
+        }
+        if (result.success) {
+            this.toast(`Purchased ${this.formatNumber(result.stars_purchased)} stars for ${this.formatNumber(result.coins_spent)} coins!`, 'success', {
+                category: 'purchase_star',
+                payload: {
+                    stars_purchased: Number(result.stars_purchased) || 0,
+                    coins_spent: Number(result.coins_spent) || 0,
+                    season_id: Number(this.state.currentSeason) || null
+                }
+            });
+            if (result.receipt) this.showEconReceipt(result.receipt, 'Star Purchase Complete');
+            if (input) input.value = '';
+            this.updatePurchaseEstimate();
+            await this.refreshGameState();
+        }
+    },
+
+    /**
+     * Wrap submitTrade to use the preview/confirm/receipt flow.
+     */
+    async submitTradeGated() {
+        const targetId = document.getElementById('trade-target').value;
+        if (!targetId) {
+            this.toast('Select a player to trade with.', 'error');
+            return;
+        }
+
+        const sideACoins = parseInt(document.getElementById('trade-a-coins').value) || 0;
+        const sideASigils = [0,1,2,3,4,5].map(i => {
+            const el = document.getElementById(`trade-a-sigil-${i}`);
+            return el ? (parseInt(el.value) || 0) : 0;
+        });
+        const sideBCoins = parseInt(document.getElementById('trade-b-coins').value) || 0;
+        const sideBSigils = [0,1,2,3,4,5].map(i => {
+            const el = document.getElementById(`trade-b-sigil-${i}`);
+            return el ? (parseInt(el.value) || 0) : 0;
+        });
+
+        const tradeParams = {
+            acceptor_id: parseInt(targetId),
+            side_a_coins: sideACoins,
+            side_a_sigils: sideASigils,
+            side_b_coins: sideBCoins,
+            side_b_sigils: sideBSigils
+        };
+
+        const result = await this.runWithEconGate(
+            () => this.api('trade_preview', tradeParams),
+            (confirm) => this.api('trade_initiate', { ...tradeParams, confirm_economic_impact: confirm ? 1 : 0 }),
+            'Confirm Trade Offer'
+        );
+
+        if (!result) return;
+        if (result.error && result.error !== 'confirmation_required') {
+            this.toast(result.error, 'error');
+            return;
+        }
+        if (result.success) {
+            this.toast(`Trade offer sent! Fee: ${this.formatNumber(result.fee)} coins.`, 'success', {
+                category: 'trade_offer_sent',
+                payload: {
+                    target_player_id: Number(targetId) || null,
+                    fee: Number(result.fee) || 0
+                }
+            });
+            if (result.receipt) this.showEconReceipt(result.receipt, 'Trade Offer Sent');
+            await this.refreshGameState();
+            this.loadMyTrades();
+        }
+    },
+
+    /**
+     * Wrap purchaseBoostPower to use the preview/confirm/receipt flow.
+     */
+    async purchaseBoostPowerGated(boostId) {
+        const boost = this._boostCatalog ? this._boostCatalog.find(b => b.boost_id == boostId) : null;
+        const name = boost ? this.getBoostDisplayName(boost.name) : `Boost #${boostId}`;
+
+        const result = await this.runWithEconGate(
+            () => this.api('boost_activate_preview', { boost_id: boostId, purchase_kind: 'power' }),
+            (confirm) => this.api('purchase_boost', { boost_id: boostId, purchase_kind: 'power', confirm_economic_impact: confirm ? 1 : 0 }),
+            `Confirm: ${name} Power`
+        );
+
+        if (!result) return;
+        if (result.error && result.error !== 'confirmation_required') {
+            this.toast(result.error, 'error');
+            return;
+        }
+        if (result.success) {
+            this.toast(result.message, 'success', {
+                category: 'boost_activate',
+                payload: { boost_id: Number(boostId) || null, season_id: Number(this.state.currentSeason) || null }
+            });
+            if (result.receipt) this.showEconReceipt(result.receipt, `${name} Activated`);
+            await this.refreshGameState();
+            this.loadBoostCatalog();
+        }
+    },
+
+    /**
+     * Wrap purchaseBoostTime to use the preview/confirm/receipt flow.
+     */
+    async purchaseBoostTimeGated(boostId) {
+        const boost = this._boostCatalog ? this._boostCatalog.find(b => b.boost_id == boostId) : null;
+        const name = boost ? this.getBoostDisplayName(boost.name) : `Boost #${boostId}`;
+
+        const result = await this.runWithEconGate(
+            () => this.api('boost_activate_preview', { boost_id: boostId, purchase_kind: 'time' }),
+            (confirm) => this.api('purchase_boost', { boost_id: boostId, purchase_kind: 'time', confirm_economic_impact: confirm ? 1 : 0 }),
+            `Confirm: ${name} Extension`
+        );
+
+        if (!result) return;
+        if (result.error && result.error !== 'confirmation_required') {
+            this.toast(result.error, 'error');
+            return;
+        }
+        if (result.success) {
+            this.toast(result.message, 'success', {
+                category: 'boost_activate',
+                payload: { boost_id: Number(boostId) || null, season_id: Number(this.state.currentSeason) || null, purchase_kind: 'time' }
+            });
+            if (result.receipt) this.showEconReceipt(result.receipt, `${name} Extended`);
+            await this.refreshGameState();
+            this.loadBoostCatalog();
+        }
+    },
 };
 
 // Initialize on load
