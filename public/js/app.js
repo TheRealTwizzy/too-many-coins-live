@@ -973,7 +973,7 @@ const TMC = {
     },
 
     async loadSeasonLeaderboard(seasonId) {
-        const lb = await this.api('leaderboard', { season_id: seasonId });
+        const lb = await this.api('leaderboard', { season_id: seasonId, limit: 20 });
         const body = document.getElementById('season-lb-body');
         const empty = document.getElementById('season-lb-empty');
         const toggleWrap = document.getElementById('season-lb-toggle-wrap');
@@ -1669,7 +1669,7 @@ const TMC = {
             );
             this.setLeaderboardHeader(['Rank', 'Player', 'Stars', 'Boost', 'Coins / Rate', 'Status']);
 
-            const lb = await this.api('leaderboard', { season_id: activeSeason.season_id });
+            const lb = await this.api('leaderboard', { season_id: activeSeason.season_id, limit: this._globalSeasonalLeaderboardExpanded ? 0 : 20 });
             if (!lb || lb.length === 0 || lb.error) {
                 body.innerHTML = '';
                 empty.style.display = '';
@@ -2733,6 +2733,11 @@ const TMC = {
     closeEconConfirm() {
         const modal = document.getElementById('econ-confirm-modal');
         if (modal) modal.style.display = 'none';
+        if (typeof this._econCancelResolver === 'function') {
+            const resolver = this._econCancelResolver;
+            this._econCancelResolver = null;
+            resolver(null);
+        }
         this._econPendingAction = null;
     },
 
@@ -2787,14 +2792,28 @@ const TMC = {
 
         if (preview.requires_explicit_confirm) {
             return new Promise((resolve) => {
+                this._econCancelResolver = resolve;
                 this.showEconConfirm(preview, title, async () => {
+                    this._econCancelResolver = null;
                     const result = await executeFn(true);
                     resolve(result);
                 });
             });
         }
 
-        return await executeFn(false);
+        const directResult = await executeFn(false);
+        if (directResult && directResult.error === 'confirmation_required' && directResult.preview) {
+            return new Promise((resolve) => {
+                this._econCancelResolver = resolve;
+                this.showEconConfirm(directResult.preview, title, async () => {
+                    this._econCancelResolver = null;
+                    const confirmedResult = await executeFn(true);
+                    resolve(confirmedResult);
+                });
+            });
+        }
+
+        return directResult;
     },
 
     /**

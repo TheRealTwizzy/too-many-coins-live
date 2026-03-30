@@ -171,7 +171,8 @@ try {
             
         case 'leaderboard':
             $seasonId = (int)($input['season_id'] ?? 0);
-            echo json_encode(getLeaderboard($seasonId));
+            $limit = isset($input['limit']) ? (int)$input['limit'] : 0;
+            echo json_encode(getLeaderboard($seasonId, $limit));
             break;
             
         case 'global_leaderboard':
@@ -338,26 +339,30 @@ try {
         // ==================== TRADING ====================
         case 'trade_preview':
             $player = Auth::requireAuth();
+            $sideASigils = normalizeSigilCounts($input['side_a_sigils'] ?? [0,0,0,0,0,0]);
+            $sideBSigils = normalizeSigilCounts($input['side_b_sigils'] ?? [0,0,0,0,0,0]);
             echo json_encode(previewTrade(
                 $player,
                 (int)($input['acceptor_id'] ?? 0),
                 (int)($input['side_a_coins'] ?? 0),
-                $input['side_a_sigils'] ?? [0,0,0,0,0,0],
+                $sideASigils,
                 (int)($input['side_b_coins'] ?? 0),
-                $input['side_b_sigils'] ?? [0,0,0,0,0,0]
+                $sideBSigils
             ));
             break;
 
         case 'trade_initiate':
             $player = Auth::requireAuth();
             $confirmed = !empty($input['confirm_economic_impact']);
+            $sideASigils = normalizeSigilCounts($input['side_a_sigils'] ?? [0,0,0,0,0,0]);
+            $sideBSigils = normalizeSigilCounts($input['side_b_sigils'] ?? [0,0,0,0,0,0]);
             $result = gatedTradeInitiate(
                 $player,
                 (int)($input['acceptor_id'] ?? 0),
                 (int)($input['side_a_coins'] ?? 0),
-                $input['side_a_sigils'] ?? [0,0,0,0,0,0],
+                $sideASigils,
                 (int)($input['side_b_coins'] ?? 0),
-                $input['side_b_sigils'] ?? [0,0,0,0,0,0],
+                $sideBSigils,
                 $confirmed
             );
             echo json_encode($result);
@@ -469,13 +474,14 @@ try {
                 'star_purchase_preview', 'trade_preview', 'boost_activate_preview'
             ]]);
     }
-} catch (Exception $e) {
+} catch (Throwable $e) {
     http_response_code(500);
     echo json_encode(['error' => 'Internal server error']);
     error_log($e->getMessage());
 }
 
 // ==================== HELPER FUNCTIONS ====================
+const LEADERBOARD_MAX_LIMIT = 200;
 
 function getSigilDropRateMetadata($sigilPower = 0) {
     $sigilPower = max(0, (int)$sigilPower);
@@ -800,10 +806,12 @@ function getSeasonDetail($player, $seasonId) {
     return $season;
 }
 
-function getLeaderboard($seasonId) {
+function getLeaderboard($seasonId, int $limit = 0) {
     $db = Database::getInstance();
     $season = $db->fetch("SELECT * FROM seasons WHERE season_id = ?", [$seasonId]);
     if (!$season) return [];
+    $limit = max(0, min(LEADERBOARD_MAX_LIMIT, (int)$limit));
+    $limitClause = $limit > 0 ? " LIMIT ?" : "";
 
     $status = GameTime::getSeasonStatus($season);
     if ($status === 'Active' || $status === 'Blackout') {
@@ -850,10 +858,12 @@ function getLeaderboard($seasonId) {
                  SELECT COALESCE(SUM(modifier_fp), 0) AS global_fp
                  FROM active_boosts
                  WHERE season_id = ? AND is_active = 1 AND scope = 'GLOBAL' AND expires_tick >= ?
-             ) glob_b
-             WHERE p.joined_season_id = ? AND p.participation_enabled = 1
-             ORDER BY COALESCE(sp.seasonal_stars, 0) DESC, p.player_id ASC",
-            [$seasonId, $seasonId, $gameTime, $seasonId, $gameTime, $seasonId, $gameTime, $seasonId]
+              ) glob_b
+              WHERE p.joined_season_id = ? AND p.participation_enabled = 1
+              ORDER BY COALESCE(sp.seasonal_stars, 0) DESC, p.player_id ASC{$limitClause}",
+            $limit > 0
+                ? [$seasonId, $seasonId, $gameTime, $seasonId, $gameTime, $seasonId, $gameTime, $seasonId, $limit]
+                : [$seasonId, $seasonId, $gameTime, $seasonId, $gameTime, $seasonId, $gameTime, $seasonId]
         );
         foreach ($rows as &$row) {
             $playerShim = [
@@ -890,14 +900,23 @@ function getLeaderboard($seasonId) {
          WHERE sp.season_id = ?
          AND (sp.seasonal_stars > 0 OR sp.end_membership = 1 OR sp.lock_in_effect_tick IS NOT NULL)
          ORDER BY sp.seasonal_stars DESC, sp.player_id ASC
-         LIMIT 100",
-        [$seasonId]
+         LIMIT ?",
+        [$seasonId, ($limit > 0 ? $limit : 100)]
     );
     foreach ($rows as &$row) {
         $row['rate_per_tick'] = 0;
     }
     unset($row);
     return $rows;
+}
+
+function normalizeSigilCounts($value): array {
+    if (!is_array($value)) return [0, 0, 0, 0, 0, 0];
+    $normalized = [0, 0, 0, 0, 0, 0];
+    for ($i = 0; $i < 6; $i++) {
+        $normalized[$i] = max(0, (int)($value[$i] ?? 0));
+    }
+    return $normalized;
 }
 
 function getGlobalLeaderboard() {
@@ -1472,13 +1491,18 @@ function previewTrade(
     );
 
     $aCoins = max(0, (int)$sideACoins);
-    $declaredValue = Economy::calculateTradeValue($season, $aCoins, $sideASigils, $sideBCoins, $sideBSigils);
+    $bCoins = max(0, (int)$sideBCoins);
+    $aSigils = normalizeSigilCounts($sideASigils);
+    $bSigils = normalizeSigilCounts($sideBSigils);
+    $declaredValue = Economy::calculateTradeValue($season, $aCoins, $aSigils, $bCoins, $bSigils);
     $fee = Economy::calculateTradeFee($season, $declaredValue);
     $totalCost = $aCoins + $fee;
+    // Both initiator and acceptor pay the same locked fee on accept.
+    $estimatedBurn = $fee * 2;
 
     $coins = (int)$participation['coins'];
     $totalSupply = max(1, (int)$season['total_coins_supply']);
-    $priceImpactBp = (int)round(($totalCost / $totalSupply) * 10000);
+    $priceImpactBp = (int)round(($estimatedBurn / $totalSupply) * 10000);
 
     $spendFraction = $coins > 0 ? min(1.0, $totalCost / $coins) : 1.0;
     $extraFlags = [];
@@ -1494,6 +1518,9 @@ function previewTrade(
     );
     $payload['declared_value'] = $declaredValue;
     $payload['side_a_coins'] = $aCoins;
+    $payload['side_b_coins'] = $bCoins;
+    $payload['estimated_burn_on_accept'] = $estimatedBurn;
+    $payload['coins_escrowed'] = $aCoins;
     $payload['coins_available'] = $coins;
 
     return array_merge(['success' => true, 'preview_type' => 'trade'], $payload);
@@ -1552,6 +1579,7 @@ function previewBoostActivate(array $player, int $boostId, string $purchaseKind)
         return ['error' => 'Cannot perform actions while idle', 'reason_code' => 'idle_gated'];
     }
 
+    $purchaseKind = ($purchaseKind === 'time') ? 'time' : 'power';
     $seasonId = (int)$fullPlayer['joined_season_id'];
     $season = $db->fetch("SELECT * FROM seasons WHERE season_id = ?", [$seasonId]);
     $status = GameTime::getSeasonStatus($season);
@@ -1573,6 +1601,9 @@ function previewBoostActivate(array $player, int $boostId, string $purchaseKind)
 
     $sigilCol = "sigils_t{$tierRequired}";
     $sigilsOwned = (int)($participation[$sigilCol] ?? 0);
+    if ($sigilsOwned < $sigilCost) {
+        return ['error' => "Insufficient Tier {$tierRequired} Sigils"];
+    }
 
     $gameTime = GameTime::now();
     $activeRow = $db->fetch(
@@ -1583,7 +1614,7 @@ function previewBoostActivate(array $player, int $boostId, string $purchaseKind)
     $extraFlags = [];
     if (!$activeRow) $extraFlags[] = 'no_boost_active';
     if ($purchaseKind === 'time') $extraFlags[] = 'time_extend';
-    if ($sigilsOwned <= $sigilCost) $extraFlags[] = 'last_sigil';
+    if ($sigilsOwned === $sigilCost) $extraFlags[] = 'last_sigil';
 
     $spendFraction = $sigilsOwned > 0 ? min(1.0, $sigilCost / $sigilsOwned) : 1.0;
     $risk = computeEconomicRisk($spendFraction, $extraFlags);

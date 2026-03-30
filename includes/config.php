@@ -67,7 +67,7 @@ define('SIGIL_TIER_DROP_RATES', [
 define('SIGIL_DROP_RATE', 8);            // 1 in 8 (~12.5% combined base drop rate at 0 sigil power)
 define('SIGIL_DROP_RATE_MAX_POWER', 16); // 1 in 16 (~6.25% combined drop rate at full sigil power)
 define('SIGIL_PITY_TICKS', ticks_from_real_seconds(120000));
-define('SIGIL_MAX_DROPS_WINDOW', 6);
+define('SIGIL_MAX_DROPS_WINDOW', 8);
 define('SIGIL_DROP_WINDOW_TICKS', ticks_from_real_seconds(86400));
 // Delivery pacing to prevent bursty notification batches during tick catch-up.
 // Earned drops are queued and released at most one per processing cycle.
@@ -92,7 +92,8 @@ define('SIGIL_INVENTORY_ADJ_MAX_STEPS', 8);    // Cap: maximum 8 triggers (≤6%
 //   denominator by 1, capped at SIGIL_BOOST_DROP_RATE_MAX_PENALTY steps.
 //   SIGIL_BOOST_DROP_RATE_FLOOR / CEILING clamp the final denominator so drops remain
 //   viable in all states and never become excessively rare.
-//   Example: base denominator 8, 40% boost → 8 + 2 = 10 (~10.0% vs ~12.5% base rate).
+//   Example: base denominator 8, 40% boost → min(floor(40/3), 3) = +3 → 11
+//   (~9.09% vs ~12.5% base rate).
 define('SIGIL_BOOST_DROP_RATE_STEP_FP',     30000); // 3% boost per denominator-penalty step
 define('SIGIL_BOOST_DROP_RATE_MAX_PENALTY',      3); // Maximum denominator increase from boost activity
 define('SIGIL_BOOST_DROP_RATE_FLOOR',            5); // Absolute minimum denominator (most generous rate)
