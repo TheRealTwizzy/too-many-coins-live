@@ -407,9 +407,7 @@ const TMC = {
                 </div>
             `;
         } else {
-            area.innerHTML = `
-                <button class="btn btn-primary btn-sm" onclick="TMC.navigate('auth')">Login / Register</button>
-            `;
+            area.innerHTML = '';
         }
     },
 
@@ -432,9 +430,9 @@ const TMC = {
             }
         } else {
             cta.innerHTML = `
-                <button class="btn btn-primary btn-lg" onclick="TMC.navigate('auth')">
-                    Get Started
-                </button>
+                <a class="btn btn-primary btn-lg" href="https://test.too-many-coins.com/">
+                    Join the Beta
+                </a>
             `;
         }
     },
