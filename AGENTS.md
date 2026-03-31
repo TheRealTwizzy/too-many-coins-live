@@ -2,8 +2,8 @@
 
 ## Repo model
 - source/dev is the working lane
-- too-many-coins-test is public sandbox
-- too-many-coins-game is public live
+- too-many-coins-game is public sandbox
+- too-many-coins-live is public live
 
 ## Deployment model
 - Dokploy app `too-many-coins-test` deploys only from test repo

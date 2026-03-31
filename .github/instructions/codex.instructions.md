@@ -4,8 +4,8 @@ Follow these standing repo and release rules at all times unless I explicitly ov
 
 ## Repo lanes
 - Source/dev repo is the main working repo.
-- Public test repo: TheRealTwizzy/too-many-coins-test
-- Public live repo: TheRealTwizzy/too-many-coins-game
+- Public test repo: TheRealTwizzy/too-many-coins-game
+- Public live repo: TheRealTwizzy/too-many-coins-live
 
 ## Deployment intent
 - The test repo is the public sandbox/beta lane.
